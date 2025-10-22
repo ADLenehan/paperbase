@@ -52,40 +52,33 @@ for doc in results:
 
 ---
 
-### 2. **Semantic/Vector Search** [HIGH PRIORITY]
+### 2. **Semantic/Vector Search** [HIGH PRIORITY] ✅ **YOU ALREADY HAVE IT**
 
 **Problem:** Current search is keyword-based. No semantic understanding.
 
 **Current:** Elasticsearch BM25 + Claude query optimization
 
-**Needed:**
-- [ ] Document embedding generation (OpenAI, Anthropic, or Cohere)
-- [ ] Vector storage (Elasticsearch vector fields or Pinecone/Weaviate)
-- [ ] Chunking strategy for long documents
-- [ ] Hybrid search (keyword + semantic)
-- [ ] MCP tool: `semantic_search_documents`
+**IMPORTANT:** You're running **Elasticsearch 8.11** which has native vector search!
+- ✅ `dense_vector` field type built-in
+- ✅ kNN search built-in
+- ✅ Hybrid search (BM25 + kNN) built-in
+- ✅ No external vector DB needed!
 
-**Architecture:**
-```
-Document → Chunk (1000 tokens) → Embed → Vector DB
-                                           ↓
-                              Search Query → Embed → Vector Search
-                                                         ↓
-                                                   Ranked Results
-```
+**Actually Needed:** (2-3 hours, not days!)
+- [ ] Add embedding generation (OpenAI or Cohere API)
+- [ ] Update index mapping to add `dense_vector` field
+- [ ] Add `vector_search()` method to ElasticsearchService
+- [ ] Expose via MCP tool: `semantic_search`
 
-**Implementation Steps:**
-1. Add embedding service (`embedding_service.py`)
-2. Chunk documents on upload (store in new `chunks` table)
-3. Generate embeddings for each chunk
-4. Store in Elasticsearch with `dense_vector` field
-5. Add hybrid search combining BM25 + kNN
-6. Expose via MCP
+**See:** `VECTOR_SEARCH_QUICKSTART.md` for complete implementation
 
-**Cost Estimate:**
-- Embeddings: ~$0.0001 per 1K tokens
-- Storage: minimal (Elasticsearch vectors)
-- Per-doc cost: ~$0.005 for 50-page document
+**Corrected Cost Estimate:**
+- Embeddings: ~$0.02 per 1M tokens (OpenAI) = ~$0.00004 per doc
+- Storage: $0 (already included in ES)
+- Per-doc cost: ~$0.0001 (one-time, 100x cheaper than I said!)
+- 1000 docs: ~$0.10 total (not $5-10!)
+
+**Time Estimate:** 2-3 hours (not 3-5 days!)
 
 ---
 
