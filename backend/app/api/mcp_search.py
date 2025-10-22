@@ -473,3 +473,334 @@ async def explain_query(query: str = Query(..., description="Natural language qu
     except Exception as e:
         logger.error(f"MCP explain query error: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/document/{document_id}/content")
+async def get_document_content_mcp(document_id: int):
+    """
+    Get full document content for LLM analysis.
+
+    Returns the complete parsed text of the document along with metadata.
+    This is the primary tool for LLMs to read and analyze document content.
+
+    **Use Cases:**
+    - Full document analysis
+    - Summarization
+    - Question answering with full context
+    - Content extraction
+    """
+
+    elastic_service = ElasticsearchService()
+
+    try:
+        doc = await elastic_service.get_document(document_id)
+
+        if not doc:
+            raise HTTPException(status_code=404, detail=f"Document {document_id} not found")
+
+        # Extract full text (may be very long)
+        full_text = doc.get("full_text", "")
+
+        # Get metadata
+        query_context = doc.get("_query_context", {})
+
+        return {
+            "success": True,
+            "document_id": document_id,
+            "filename": doc.get("filename"),
+            "content": full_text,
+            "content_length": len(full_text),
+            "metadata": {
+                "uploaded_at": doc.get("uploaded_at"),
+                "processed_at": doc.get("processed_at"),
+                "template": query_context.get("template_name"),
+                "status": doc.get("status"),
+                "field_count": len(query_context.get("field_names", []))
+            },
+            "extracted_fields": {
+                k: v for k, v in doc.items()
+                if not k.startswith("_") and k not in ["document_id", "filename", "full_text", "uploaded_at", "processed_at", "confidence_scores"]
+            }
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting document content: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/document/{document_id}/chunks")
+async def get_document_chunks_mcp(
+    document_id: int,
+    chunk_size: int = Query(default=2000, ge=100, le=10000, description="Characters per chunk"),
+    page: int = Query(default=1, ge=1, description="Page number (1-indexed)"),
+    overlap: int = Query(default=200, ge=0, le=1000, description="Character overlap between chunks")
+):
+    """
+    Get document content in chunks for processing long documents.
+
+    This is useful when documents are too long to fit in a single LLM context window.
+    Returns paginated chunks with overlap to maintain context between chunks.
+
+    **Parameters:**
+    - chunk_size: Characters per chunk (100-10000)
+    - page: Which chunk to return (1-indexed)
+    - overlap: Characters to overlap between chunks (maintains context)
+
+    **Use Cases:**
+    - Processing very long documents
+    - Progressive analysis
+    - Memory-efficient document reading
+    """
+
+    elastic_service = ElasticsearchService()
+
+    try:
+        doc = await elastic_service.get_document(document_id)
+
+        if not doc:
+            raise HTTPException(status_code=404, detail=f"Document {document_id} not found")
+
+        full_text = doc.get("full_text", "")
+
+        if not full_text:
+            return {
+                "success": True,
+                "document_id": document_id,
+                "chunks": [],
+                "total_chunks": 0,
+                "message": "Document has no text content"
+            }
+
+        # Split into chunks with overlap
+        chunks = []
+        start = 0
+        chunk_num = 0
+
+        while start < len(full_text):
+            end = min(start + chunk_size, len(full_text))
+            chunk_text = full_text[start:end]
+
+            chunk_num += 1
+            chunks.append({
+                "chunk_number": chunk_num,
+                "start_char": start,
+                "end_char": end,
+                "content": chunk_text,
+                "length": len(chunk_text)
+            })
+
+            # Move start position with overlap
+            start = end - overlap
+            if start >= len(full_text):
+                break
+
+        # Return requested page
+        total_chunks = len(chunks)
+        if page > total_chunks:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Page {page} out of range. Document has {total_chunks} chunks."
+            )
+
+        requested_chunk = chunks[page - 1]
+
+        return {
+            "success": True,
+            "document_id": document_id,
+            "filename": doc.get("filename"),
+            "chunk": requested_chunk,
+            "pagination": {
+                "current_page": page,
+                "total_chunks": total_chunks,
+                "chunk_size": chunk_size,
+                "overlap": overlap,
+                "has_next": page < total_chunks,
+                "has_previous": page > 1
+            },
+            "metadata": {
+                "total_characters": len(full_text),
+                "template": doc.get("_query_context", {}).get("template_name")
+            }
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting document chunks: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/rag/query")
+async def rag_query_mcp(
+    question: str = Query(..., description="Question to answer"),
+    max_results: int = Query(default=5, ge=1, le=20, description="Max documents to use as context"),
+    filters: Optional[Dict[str, Any]] = None
+):
+    """
+    Answer a question using the document corpus (RAG - Retrieval Augmented Generation).
+
+    This tool searches the document corpus for relevant information and uses it
+    to generate an answer grounded in actual document content.
+
+    **How it works:**
+    1. Search for relevant documents matching the question
+    2. Extract text from top matching documents
+    3. Send question + context to Claude for answering
+    4. Return answer with source citations
+
+    **Use Cases:**
+    - Question answering grounded in documents
+    - Research and discovery
+    - Fact checking against corpus
+    - Summary generation with citations
+
+    **Example:**
+    ```
+    Question: "What were the total contract values in Q1 2024?"
+    Returns: Answer with specific values and source document references
+    ```
+    """
+
+    elastic_service = ElasticsearchService()
+    claude_service = ClaudeService()
+
+    try:
+        from app.core.database import SessionLocal
+        from app.services.schema_registry import SchemaRegistry
+
+        db = SessionLocal()
+
+        try:
+            schema_registry = SchemaRegistry(db)
+            query_optimizer = QueryOptimizer(schema_registry=schema_registry)
+            await query_optimizer.initialize_from_registry()
+
+            # Get field context
+            field_metadata_list = await schema_registry.get_all_templates_context()
+            all_field_names = []
+            combined_metadata = {"fields": {}}
+
+            for template_context in field_metadata_list:
+                all_field_names.extend(template_context.get("all_field_names", []))
+                combined_metadata["fields"].update(template_context.get("fields", {}))
+
+            all_field_names.extend([
+                "filename", "uploaded_at", "processed_at",
+                "status", "template_name", "confidence_scores", "folder_path"
+            ])
+            available_fields = list(set(all_field_names))
+
+            # Analyze query
+            query_analysis = query_optimizer.understand_query_intent(
+                query=question,
+                available_fields=available_fields
+            )
+
+            # Build ES query (use optimizer for efficiency)
+            if query_optimizer.should_use_claude(query_analysis):
+                nl_result = await claude_service.parse_natural_language_query(
+                    query=question,
+                    available_fields=available_fields,
+                    field_metadata=combined_metadata
+                )
+                es_query = nl_result.get("elasticsearch_query", {}).get("query", {})
+            else:
+                es_query = query_optimizer.build_optimized_query(
+                    query=question,
+                    analysis=query_analysis,
+                    available_fields=available_fields
+                )
+
+            # Add filters if provided
+            if filters:
+                if "bool" not in es_query:
+                    es_query = {"bool": {"must": [es_query] if es_query else [{"match_all": {}}]}}
+                if "filter" not in es_query["bool"]:
+                    es_query["bool"]["filter"] = []
+                for field, value in filters.items():
+                    es_query["bool"]["filter"].append({"term": {field: value}})
+
+            # Execute search
+            search_results = await elastic_service.search(
+                query=None,
+                filters=None,
+                custom_query=es_query,
+                page=1,
+                size=max_results
+            )
+
+            # Build context from results
+            context_chunks = []
+            for doc in search_results.get("documents", []):
+                data = doc["data"]
+                # Get full text (limit to first 2000 chars per doc to avoid token limits)
+                text = data.get("full_text", "")[:2000]
+
+                context_chunks.append({
+                    "text": text,
+                    "source": data.get("filename", "Unknown"),
+                    "document_id": doc["id"],
+                    "score": doc["score"]
+                })
+
+            if not context_chunks:
+                return {
+                    "success": True,
+                    "question": question,
+                    "answer": "No relevant documents found to answer this question.",
+                    "sources": [],
+                    "confidence": "none"
+                }
+
+            # Build prompt for Claude
+            context_text = "\n\n---\n\n".join([
+                f"Document: {c['source']}\n{c['text']}"
+                for c in context_chunks
+            ])
+
+            prompt = f"""Answer the following question based ONLY on the provided documents.
+If the documents don't contain enough information to answer confidently, say so.
+Cite the specific documents you used in your answer.
+
+Documents:
+{context_text}
+
+Question: {question}
+
+Provide a clear, concise answer with citations to specific documents."""
+
+            # Get answer from Claude
+            answer = await claude_service.answer_question_about_results(
+                query=question,
+                search_results=search_results.get("documents", []),
+                total_count=search_results.get("total", 0)
+            )
+
+            return {
+                "success": True,
+                "question": question,
+                "answer": answer,
+                "sources": [
+                    {
+                        "document_id": c["document_id"],
+                        "filename": c["source"],
+                        "relevance_score": c["score"],
+                        "excerpt": c["text"][:200] + "..." if len(c["text"]) > 200 else c["text"]
+                    }
+                    for c in context_chunks
+                ],
+                "metadata": {
+                    "num_sources": len(context_chunks),
+                    "total_matches": search_results.get("total", 0),
+                    "query_method": "claude" if query_optimizer.should_use_claude(query_analysis) else "optimizer"
+                }
+            }
+
+        finally:
+            db.close()
+
+    except Exception as e:
+        logger.error(f"RAG query error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))

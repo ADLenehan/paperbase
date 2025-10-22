@@ -170,6 +170,68 @@ def test_original_search():
     return response.status_code == 200
 
 
+def test_document_content():
+    """Test document content retrieval (critical for LLM analysis)"""
+    # First search for a document
+    search_response = requests.post(
+        f"{BASE_URL}/api/mcp/search/documents",
+        json={"query": "test", "max_results": 1}
+    )
+
+    if search_response.status_code == 200:
+        data = search_response.json()
+        if data.get("documents"):
+            doc_id = data["documents"][0]["id"]
+
+            # Get content
+            content_response = requests.get(
+                f"{BASE_URL}/api/mcp/search/document/{doc_id}/content"
+            )
+            print_result(f"Get Document Content (ID: {doc_id})", content_response)
+            return content_response.status_code == 200
+
+    print("\n⚠️  Skipping document content test (no documents found)")
+    return True  # Don't fail if no documents
+
+
+def test_document_chunks():
+    """Test document chunking for long documents"""
+    # First search for a document
+    search_response = requests.post(
+        f"{BASE_URL}/api/mcp/search/documents",
+        json={"query": "test", "max_results": 1}
+    )
+
+    if search_response.status_code == 200:
+        data = search_response.json()
+        if data.get("documents"):
+            doc_id = data["documents"][0]["id"]
+
+            # Get chunks
+            chunks_response = requests.get(
+                f"{BASE_URL}/api/mcp/search/document/{doc_id}/chunks",
+                params={"chunk_size": 1000, "page": 1}
+            )
+            print_result(f"Get Document Chunks (ID: {doc_id})", chunks_response)
+            return chunks_response.status_code == 200
+
+    print("\n⚠️  Skipping document chunks test (no documents found)")
+    return True
+
+
+def test_rag_query():
+    """Test RAG (Retrieval Augmented Generation) query"""
+    response = requests.post(
+        f"{BASE_URL}/api/mcp/search/rag/query",
+        params={
+            "question": "What documents do we have?",
+            "max_results": 3
+        }
+    )
+    print_result("RAG Query", response)
+    return response.status_code == 200
+
+
 def main():
     """Run all tests"""
     print("\n" + "="*60)
@@ -183,6 +245,9 @@ def main():
         ("MCP Search Stats", test_mcp_search_stats),
         ("MCP Search Documents", test_mcp_search_documents),
         ("MCP Explain Query", test_mcp_explain_query),
+        ("Get Document Content", test_document_content),  # NEW: Critical for LLM analysis
+        ("Get Document Chunks", test_document_chunks),     # NEW: For long documents
+        ("RAG Query", test_rag_query),                      # NEW: Question answering
         ("Single Aggregation", test_aggregation_single),
         ("Multi Aggregation", test_aggregation_multi),
         ("Dashboard Aggregation", test_aggregation_dashboard),

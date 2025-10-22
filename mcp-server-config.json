@@ -140,6 +140,86 @@
       }
     },
     {
+      "name": "get_document_content",
+      "description": "Get full document content for LLM analysis - returns complete parsed text",
+      "endpoint": "/api/mcp/search/document/{document_id}/content",
+      "method": "GET",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "document_id": {
+            "type": "integer",
+            "description": "Document ID to retrieve content for"
+          }
+        },
+        "required": ["document_id"]
+      }
+    },
+    {
+      "name": "get_document_chunks",
+      "description": "Get document content in chunks for processing long documents",
+      "endpoint": "/api/mcp/search/document/{document_id}/chunks",
+      "method": "GET",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "document_id": {
+            "type": "integer",
+            "description": "Document ID"
+          },
+          "chunk_size": {
+            "type": "integer",
+            "description": "Characters per chunk (100-10000)",
+            "default": 2000,
+            "minimum": 100,
+            "maximum": 10000
+          },
+          "page": {
+            "type": "integer",
+            "description": "Chunk number to retrieve (1-indexed)",
+            "default": 1,
+            "minimum": 1
+          },
+          "overlap": {
+            "type": "integer",
+            "description": "Character overlap between chunks",
+            "default": 200,
+            "minimum": 0,
+            "maximum": 1000
+          }
+        },
+        "required": ["document_id"]
+      }
+    },
+    {
+      "name": "rag_query",
+      "description": "Answer questions using document corpus (RAG) - returns answer with source citations",
+      "endpoint": "/api/mcp/search/rag/query",
+      "method": "POST",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "question": {
+            "type": "string",
+            "description": "Question to answer based on documents"
+          },
+          "max_results": {
+            "type": "integer",
+            "description": "Maximum number of documents to use as context",
+            "default": 5,
+            "minimum": 1,
+            "maximum": 20
+          },
+          "filters": {
+            "type": "object",
+            "description": "Optional filters to narrow document search",
+            "additionalProperties": true
+          }
+        },
+        "required": ["question"]
+      }
+    },
+    {
       "name": "multi_aggregate",
       "description": "Execute multiple aggregations in a single query for comprehensive analytics",
       "endpoint": "/api/aggregations/multi",
