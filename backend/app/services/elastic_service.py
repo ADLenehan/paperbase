@@ -375,19 +375,349 @@ class ElasticsearchService:
             doc=updated_fields
         )
 
-    async def get_aggregations(self, field: str) -> Dict[str, Any]:
-        """Get aggregations for analytics"""
+    async def get_aggregations(
+        self,
+        field: str = None,
+        agg_type: str = "terms",
+        agg_config: Optional[Dict[str, Any]] = None,
+        filters: Optional[Dict[str, Any]] = None,
+        custom_aggs: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        """
+        Get aggregations for analytics with flexible configuration.
+
+        Args:
+            field: Field to aggregate (required unless custom_aggs provided)
+            agg_type: Type of aggregation (terms, stats, date_histogram, range, cardinality)
+            agg_config: Additional aggregation configuration
+            filters: Optional query filters to apply before aggregation
+            custom_aggs: Custom aggregation definition (overrides field/agg_type)
+
+        Returns:
+            Aggregation results with metadata
+        """
+
+        # Build aggregation definition
+        if custom_aggs:
+            aggs = custom_aggs
+        else:
+            if not field:
+                raise ValueError("field is required when custom_aggs is not provided")
+
+            agg_name = f"{field}_{agg_type}"
+
+            # Build aggregation based on type
+            if agg_type == "terms":
+                aggs = {
+                    agg_name: {
+                        "terms": {
+                            "field": f"{field}.keyword" if not field.endswith(".keyword") else field,
+                            "size": agg_config.get("size", 100) if agg_config else 100,
+                            "order": agg_config.get("order", {"_count": "desc"}) if agg_config else {"_count": "desc"}
+                        }
+                    }
+                }
+            elif agg_type == "stats":
+                aggs = {
+                    agg_name: {
+                        "stats": {
+                            "field": field
+                        }
+                    }
+                }
+            elif agg_type == "extended_stats":
+                aggs = {
+                    agg_name: {
+                        "extended_stats": {
+                            "field": field
+                        }
+                    }
+                }
+            elif agg_type == "date_histogram":
+                aggs = {
+                    agg_name: {
+                        "date_histogram": {
+                            "field": field,
+                            "calendar_interval": agg_config.get("interval", "month") if agg_config else "month",
+                            "format": agg_config.get("format", "yyyy-MM-dd") if agg_config else "yyyy-MM-dd"
+                        }
+                    }
+                }
+            elif agg_type == "range":
+                if not agg_config or "ranges" not in agg_config:
+                    raise ValueError("ranges must be provided in agg_config for range aggregation")
+                aggs = {
+                    agg_name: {
+                        "range": {
+                            "field": field,
+                            "ranges": agg_config["ranges"]
+                        }
+                    }
+                }
+            elif agg_type == "cardinality":
+                aggs = {
+                    agg_name: {
+                        "cardinality": {
+                            "field": f"{field}.keyword" if not field.endswith(".keyword") else field
+                        }
+                    }
+                }
+            elif agg_type == "histogram":
+                aggs = {
+                    agg_name: {
+                        "histogram": {
+                            "field": field,
+                            "interval": agg_config.get("interval", 100) if agg_config else 100
+                        }
+                    }
+                }
+            elif agg_type == "percentiles":
+                aggs = {
+                    agg_name: {
+                        "percentiles": {
+                            "field": field,
+                            "percents": agg_config.get("percents", [25, 50, 75, 95, 99]) if agg_config else [25, 50, 75, 95, 99]
+                        }
+                    }
+                }
+            else:
+                raise ValueError(f"Unsupported aggregation type: {agg_type}")
+
+        # Build query with optional filters
+        query = {"match_all": {}}
+        if filters:
+            filter_clauses = []
+            for filter_field, filter_value in filters.items():
+                if isinstance(filter_value, dict):
+                    # Range or complex filter
+                    filter_clauses.append({filter_field: filter_value})
+                else:
+                    # Term filter
+                    filter_clauses.append({"term": {filter_field: filter_value}})
+
+            query = {
+                "bool": {
+                    "filter": filter_clauses
+                }
+            }
+
         response = await self.client.search(
             index=self.index_name,
             size=0,
-            aggs={
-                f"{field}_stats": {
+            query=query,
+            aggs=aggs
+        )
+
+        return response["aggregations"]
+
+    async def get_multi_aggregations(
+        self,
+        aggregations: List[Dict[str, Any]],
+        filters: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        """
+        Execute multiple aggregations in a single query.
+
+        Args:
+            aggregations: List of aggregation definitions, each with:
+                - name: Aggregation name
+                - field: Field to aggregate
+                - type: Aggregation type
+                - config: Optional configuration
+            filters: Optional query filters
+
+        Returns:
+            Dictionary of aggregation results keyed by name
+
+        Example:
+            aggregations = [
+                {"name": "status_breakdown", "field": "status", "type": "terms"},
+                {"name": "amount_stats", "field": "total_amount", "type": "stats"},
+                {"name": "monthly_uploads", "field": "uploaded_at", "type": "date_histogram",
+                 "config": {"interval": "month"}}
+            ]
+        """
+
+        aggs = {}
+        for agg_def in aggregations:
+            name = agg_def["name"]
+            field = agg_def["field"]
+            agg_type = agg_def["type"]
+            config = agg_def.get("config", {})
+
+            # Build individual aggregation
+            if agg_type == "terms":
+                aggs[name] = {
                     "terms": {
-                        "field": field,
-                        "size": 100
+                        "field": f"{field}.keyword" if not field.endswith(".keyword") else field,
+                        "size": config.get("size", 100),
+                        "order": config.get("order", {"_count": "desc"})
                     }
                 }
+            elif agg_type == "stats":
+                aggs[name] = {"stats": {"field": field}}
+            elif agg_type == "extended_stats":
+                aggs[name] = {"extended_stats": {"field": field}}
+            elif agg_type == "date_histogram":
+                aggs[name] = {
+                    "date_histogram": {
+                        "field": field,
+                        "calendar_interval": config.get("interval", "month"),
+                        "format": config.get("format", "yyyy-MM-dd")
+                    }
+                }
+            elif agg_type == "range":
+                if "ranges" not in config:
+                    raise ValueError(f"ranges required for {name}")
+                aggs[name] = {
+                    "range": {
+                        "field": field,
+                        "ranges": config["ranges"]
+                    }
+                }
+            elif agg_type == "cardinality":
+                aggs[name] = {
+                    "cardinality": {
+                        "field": f"{field}.keyword" if not field.endswith(".keyword") else field
+                    }
+                }
+            elif agg_type == "histogram":
+                aggs[name] = {
+                    "histogram": {
+                        "field": field,
+                        "interval": config.get("interval", 100)
+                    }
+                }
+            elif agg_type == "percentiles":
+                aggs[name] = {
+                    "percentiles": {
+                        "field": field,
+                        "percents": config.get("percents", [25, 50, 75, 95, 99])
+                    }
+                }
+
+        # Build query
+        query = {"match_all": {}}
+        if filters:
+            filter_clauses = []
+            for filter_field, filter_value in filters.items():
+                if isinstance(filter_value, dict):
+                    filter_clauses.append({filter_field: filter_value})
+                else:
+                    filter_clauses.append({"term": {filter_field: filter_value}})
+
+            query = {
+                "bool": {
+                    "filter": filter_clauses
+                }
             }
+
+        response = await self.client.search(
+            index=self.index_name,
+            size=0,
+            query=query,
+            aggs=aggs
+        )
+
+        return response["aggregations"]
+
+    async def get_nested_aggregations(
+        self,
+        parent_agg: Dict[str, Any],
+        sub_aggs: List[Dict[str, Any]],
+        filters: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        """
+        Execute nested (hierarchical) aggregations.
+
+        Args:
+            parent_agg: Parent aggregation definition
+            sub_aggs: List of sub-aggregation definitions
+            filters: Optional query filters
+
+        Returns:
+            Nested aggregation results
+
+        Example:
+            # Group by status, then get amount stats for each status
+            parent_agg = {"name": "by_status", "field": "status", "type": "terms"}
+            sub_aggs = [{"name": "amount_stats", "field": "total_amount", "type": "stats"}]
+        """
+
+        # Build sub-aggregations
+        sub_agg_dict = {}
+        for sub_agg in sub_aggs:
+            name = sub_agg["name"]
+            field = sub_agg["field"]
+            agg_type = sub_agg["type"]
+            config = sub_agg.get("config", {})
+
+            if agg_type == "stats":
+                sub_agg_dict[name] = {"stats": {"field": field}}
+            elif agg_type == "terms":
+                sub_agg_dict[name] = {
+                    "terms": {
+                        "field": f"{field}.keyword" if not field.endswith(".keyword") else field,
+                        "size": config.get("size", 100)
+                    }
+                }
+            elif agg_type == "cardinality":
+                sub_agg_dict[name] = {
+                    "cardinality": {
+                        "field": f"{field}.keyword" if not field.endswith(".keyword") else field
+                    }
+                }
+
+        # Build parent aggregation with sub-aggregations
+        parent_name = parent_agg["name"]
+        parent_field = parent_agg["field"]
+        parent_type = parent_agg["type"]
+        parent_config = parent_agg.get("config", {})
+
+        if parent_type == "terms":
+            aggs = {
+                parent_name: {
+                    "terms": {
+                        "field": f"{parent_field}.keyword" if not parent_field.endswith(".keyword") else parent_field,
+                        "size": parent_config.get("size", 100)
+                    },
+                    "aggs": sub_agg_dict
+                }
+            }
+        elif parent_type == "date_histogram":
+            aggs = {
+                parent_name: {
+                    "date_histogram": {
+                        "field": parent_field,
+                        "calendar_interval": parent_config.get("interval", "month")
+                    },
+                    "aggs": sub_agg_dict
+                }
+            }
+        else:
+            raise ValueError(f"Unsupported parent aggregation type: {parent_type}")
+
+        # Build query
+        query = {"match_all": {}}
+        if filters:
+            filter_clauses = []
+            for filter_field, filter_value in filters.items():
+                if isinstance(filter_value, dict):
+                    filter_clauses.append({filter_field: filter_value})
+                else:
+                    filter_clauses.append({"term": {filter_field: filter_value}})
+
+            query = {
+                "bool": {
+                    "filter": filter_clauses
+                }
+            }
+
+        response = await self.client.search(
+            index=self.index_name,
+            size=0,
+            query=query,
+            aggs=aggs
         )
 
         return response["aggregations"]
