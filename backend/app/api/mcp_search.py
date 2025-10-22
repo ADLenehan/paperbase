@@ -193,7 +193,28 @@ async def search_documents_mcp(request: MCPSearchRequest):
                 }
             )
 
-            return response
+            # Add LLM-friendly response enhancements
+            enhanced_response = response.model_dump()
+            enhanced_response["summary"] = f"Found {search_results.get('total', 0)} documents matching '{request.query}'"
+
+            if cleaned_documents:
+                enhanced_response["top_result_preview"] = {
+                    "id": cleaned_documents[0]["id"],
+                    "filename": cleaned_documents[0].get("filename", "Unknown"),
+                    "excerpt": str(cleaned_documents[0].get("full_text", ""))[:200] + "..." if cleaned_documents[0].get("full_text") else "No preview"
+                }
+
+                enhanced_response["next_steps"] = {
+                    "to_read_content": f"Call get_document_content({cleaned_documents[0]['id']}) to read the full text",
+                    "to_answer_question": "Call rag_query with a specific question about these documents",
+                    "to_analyze": "Call multi_aggregate to calculate statistics across results"
+                }
+            else:
+                enhanced_response["next_steps"] = {
+                    "suggestion": "Try broadening your search query or checking filters"
+                }
+
+            return enhanced_response
 
         finally:
             db.close()
@@ -504,8 +525,10 @@ async def get_document_content_mcp(document_id: int):
         # Get metadata
         query_context = doc.get("_query_context", {})
 
+        # Enhanced response with summary and guidance
         return {
             "success": True,
+            "summary": f"Document '{doc.get('filename')}' ({len(full_text):,} characters, {len(query_context.get('field_names', []))} fields extracted)",
             "document_id": document_id,
             "filename": doc.get("filename"),
             "content": full_text,
@@ -520,6 +543,12 @@ async def get_document_content_mcp(document_id: int):
             "extracted_fields": {
                 k: v for k, v in doc.items()
                 if not k.startswith("_") and k not in ["document_id", "filename", "full_text", "uploaded_at", "processed_at", "confidence_scores"]
+            },
+            "content_preview": full_text[:500] + "..." if len(full_text) > 500 else full_text,
+            "next_steps": {
+                "to_analyze": "Process this content with your analysis logic",
+                "to_chunk": f"If content is too long, use get_document_chunks({document_id}) for paginated access",
+                "to_ask_question": "Use rag_query to ask specific questions about this document"
             }
         }
 
@@ -778,25 +807,35 @@ Provide a clear, concise answer with citations to specific documents."""
                 total_count=search_results.get("total", 0)
             )
 
-            return {
+            # Enhanced response with LLM guidance
+            response = {
                 "success": True,
+                "summary": f"Answered based on {len(context_chunks)} relevant documents",
                 "question": question,
                 "answer": answer,
                 "sources": [
                     {
                         "document_id": c["document_id"],
                         "filename": c["source"],
-                        "relevance_score": c["score"],
+                        "relevance_score": round(c["score"], 3),
                         "excerpt": c["text"][:200] + "..." if len(c["text"]) > 200 else c["text"]
                     }
                     for c in context_chunks
                 ],
+                "confidence": "high" if len(context_chunks) >= 3 else "medium" if len(context_chunks) >= 1 else "low",
                 "metadata": {
                     "num_sources": len(context_chunks),
                     "total_matches": search_results.get("total", 0),
                     "query_method": "claude" if query_optimizer.should_use_claude(query_analysis) else "optimizer"
+                },
+                "next_steps": {
+                    "to_read_source": f"Call get_document_content({context_chunks[0]['document_id']}) to read full source document" if context_chunks else None,
+                    "to_refine": "Ask a follow-up question with rag_query for more detail",
+                    "to_find_more": "Use search_documents to find additional related documents"
                 }
             }
+
+            return response
 
         finally:
             db.close()
