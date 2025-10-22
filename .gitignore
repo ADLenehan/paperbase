@@ -1,0 +1,86 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+venv/
+env/
+ENV/
+
+# Node
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+dist/
+.DS_Store
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+
+# Uploads & Documents
+uploads/
+test_documents/**/*.pdf
+test_documents/**/*.docx
+test_documents/**/*.doc
+test_documents/**/*.png
+test_documents/**/*.jpg
+!test_documents/README.md
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Docker
+.dockerignore
+
+# Testing
+.coverage
+htmlcov/
+.pytest_cache/
+
+# Project artifacts
+paperbase-setup.zip
+
+# Redundant/legacy docs (keep only CLAUDE.md, QUICK_START.md, NEW_ARCHITECTURE.md, VERIFICATION_CHECKLIST.md, PROJECT_PLAN.md, README.md)
+QUICKSTART.md
+START_HERE.md
+INSTALLATION.md
+WHATS_INCLUDED.md
+IMPLEMENTATION_SUMMARY.md
+INSPECT_GUIDE.md

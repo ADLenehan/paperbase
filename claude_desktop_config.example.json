@@ -1,0 +1,19 @@
+{
+  "mcpServers": {
+    "paperbase": {
+      "command": "python",
+      "args": [
+        "-m",
+        "mcp_server"
+      ],
+      "cwd": "/Users/YOUR_USERNAME/Projects/paperbase/backend",
+      "env": {
+        "DATABASE_URL": "sqlite:////Users/YOUR_USERNAME/Projects/paperbase/backend/paperbase.db",
+        "ELASTICSEARCH_URL": "http://localhost:9200",
+        "MCP_LOG_LEVEL": "INFO",
+        "MCP_CACHE_ENABLED": "true",
+        "MCP_CACHE_MAX_SIZE": "1000"
+      }
+    }
+  }
+}

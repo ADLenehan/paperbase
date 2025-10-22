@@ -1,0 +1,21 @@
+INVOICE
+
+Invoice Number: INV-2024-001
+Date: January 15, 2024
+
+Bill To:
+Acme Corporation
+123 Business St
+San Francisco, CA 94102
+
+Description                  Quantity    Unit Price    Total
+----------------------------------------------------------------
+Consulting Services          10 hours    $150.00       $1,500.00
+Software License             1           $500.00       $500.00
+Support Package              1           $250.00       $250.00
+
+                                         Subtotal:     $2,250.00
+                                         Tax (8.5%):   $191.25
+                                         TOTAL:        $2,441.25
+
+Payment Due: February 15, 2024

@@ -1,0 +1,20 @@
+RECEIPT
+
+Receipt #: REC-2024-001
+Date: January 18, 2024
+Time: 2:45 PM
+
+Store: Electronics Plus
+Location: 789 Tech Blvd, Austin, TX 78701
+
+Items:
+- Wireless Mouse              $29.99
+- USB Cable (3-pack)          $15.99
+- Laptop Stand                $45.00
+
+Subtotal:                     $90.98
+Tax:                          $7.28
+TOTAL:                        $98.26
+
+Payment Method: Credit Card (****1234)
+Thank you for your purchase!
