@@ -1,0 +1,21 @@
+[build]
+builder = "NIXPACKS"
+
+[deploy]
+startCommand = "uvicorn app.main:app --host 0.0.0.0 --port $PORT"
+healthcheckPath = "/health"
+healthcheckTimeout = 100
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 10
+
+[[services]]
+name = "backend"
+source = "./backend"
+
+[[services]]
+name = "frontend"
+source = "./frontend"
+
+[[services]]
+name = "elasticsearch"
+image = "docker.elastic.co/elasticsearch/elasticsearch:8.11.0"

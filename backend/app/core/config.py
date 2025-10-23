@@ -12,10 +12,18 @@ class Settings(BaseSettings):
 
     # Elasticsearch
     ELASTICSEARCH_URL: str = "http://localhost:9200"
+    ELASTICSEARCH_USERNAME: Optional[str] = None  # For Elastic Cloud
+    ELASTICSEARCH_PASSWORD: Optional[str] = None  # For Elastic Cloud
 
     # Server
     BACKEND_HOST: str = "0.0.0.0"
     BACKEND_PORT: int = 8000
+    PORT: Optional[int] = None  # Cloud platforms (Railway, Render) use PORT env var
+
+    @property
+    def server_port(self) -> int:
+        """Returns PORT if set (for cloud deployment), otherwise BACKEND_PORT"""
+        return self.PORT if self.PORT is not None else self.BACKEND_PORT
 
     # File Upload
     MAX_UPLOAD_SIZE_MB: int = 50
@@ -32,6 +40,16 @@ class Settings(BaseSettings):
     # Development
     DEBUG: bool = True
     LOG_LEVEL: str = "INFO"
+
+    # CORS - Frontend URLs for production
+    ALLOWED_ORIGINS: str = "*"  # Comma-separated list or "*" for all
+
+    @property
+    def cors_origins(self) -> list:
+        """Parse ALLOWED_ORIGINS into a list"""
+        if self.ALLOWED_ORIGINS == "*":
+            return ["*"]
+        return [origin.strip() for origin in self.ALLOWED_ORIGINS.split(",")]
 
     class Config:
         env_file = ".env"

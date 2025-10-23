@@ -1,0 +1,65 @@
+services:
+  # Backend API
+  - type: web
+    name: paperbase-backend
+    runtime: python
+    plan: starter
+    buildCommand: cd backend && pip install -r requirements.txt
+    startCommand: cd backend && uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11
+      - key: ELASTICSEARCH_URL
+        fromService:
+          type: pserv
+          name: paperbase-elasticsearch
+          property: hostport
+      - key: DATABASE_URL
+        fromDatabase:
+          name: paperbase-db
+          property: connectionString
+      - key: REDUCTO_API_KEY
+        sync: false  # Set in Render dashboard
+      - key: ANTHROPIC_API_KEY
+        sync: false  # Set in Render dashboard
+
+  # Frontend
+  - type: web
+    name: paperbase-frontend
+    runtime: node
+    plan: starter
+    buildCommand: cd frontend && npm install && npm run build
+    startCommand: cd frontend && npm run preview -- --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: NODE_VERSION
+        value: 18
+      - key: VITE_API_URL
+        fromService:
+          type: web
+          name: paperbase-backend
+          property: host
+
+  # Elasticsearch (Private Service)
+  - type: pserv
+    name: paperbase-elasticsearch
+    runtime: docker
+    plan: starter
+    image:
+      url: docker.elastic.co/elasticsearch/elasticsearch:8.11.0
+    disk:
+      name: elasticsearch-data
+      mountPath: /usr/share/elasticsearch/data
+      sizeGB: 10
+    envVars:
+      - key: discovery.type
+        value: single-node
+      - key: xpack.security.enabled
+        value: false
+      - key: ES_JAVA_OPTS
+        value: "-Xms512m -Xmx512m"
+
+databases:
+  - name: paperbase-db
+    plan: starter
+    databaseName: paperbase

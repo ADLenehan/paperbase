@@ -9,7 +9,16 @@ logger = logging.getLogger(__name__)
 
 class ElasticsearchService:
     def __init__(self):
-        self.client = AsyncElasticsearch([settings.ELASTICSEARCH_URL])
+        # Support Elastic Cloud authentication
+        es_config = {"hosts": [settings.ELASTICSEARCH_URL]}
+
+        if settings.ELASTICSEARCH_USERNAME and settings.ELASTICSEARCH_PASSWORD:
+            es_config["basic_auth"] = (
+                settings.ELASTICSEARCH_USERNAME,
+                settings.ELASTICSEARCH_PASSWORD
+            )
+
+        self.client = AsyncElasticsearch(**es_config)
         self.index_name = "documents"
         self.template_signatures_index = "template_signatures"
 
