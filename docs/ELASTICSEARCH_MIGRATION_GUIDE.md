@@ -6,6 +6,32 @@ This guide covers migrating from the old Elasticsearch mappings to the new optim
 
 ---
 
+## 🚀 Quick Start (Most Users)
+
+**If you don't need to preserve existing data**, use the simple fresh start approach:
+
+```bash
+./scripts/fresh_start.sh
+```
+
+**See:** `docs/QUICK_START_OPTIMIZED_MAPPINGS.md` for the simplified guide.
+
+---
+
+## 📋 This Guide is For
+
+This detailed migration guide is for **production deployments** where you need to:
+- ✅ Preserve existing document data
+- ✅ Minimize downtime
+- ✅ Gradually roll out changes
+- ✅ Have rollback capability
+
+**For development/testing:** Use the fresh start approach instead (much simpler).
+
+---
+
+---
+
 ## What Changed?
 
 ### Summary of Changes
