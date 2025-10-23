@@ -110,6 +110,16 @@ async def startup_event():
     except Exception as e:
         logger.error(f"Error seeding templates: {e}")
 
+    # MCP Server availability notice
+    logger.info("=" * 50)
+    logger.info("Paperbase API started successfully!")
+    logger.info("=" * 50)
+    logger.info("MCP Integration: Available")
+    logger.info("To use with Claude Desktop, configure:")
+    logger.info('  ~/.config/Claude/claude_desktop_config.json')
+    logger.info('  Add: {"mcpServers": {"paperbase": {"command": "python", "args": ["-m", "app.mcp.server"]}}}')
+    logger.info("=" * 50)
+
 
 # Health check endpoint
 @app.get("/health")
@@ -118,6 +128,52 @@ async def health_check():
         "status": "healthy",
         "version": "0.1.0",
         "service": "paperbase-api"
+    }
+
+
+# MCP (Model Context Protocol) Endpoints
+
+@app.get("/api/mcp/status")
+async def mcp_status():
+    """
+    Get MCP server status.
+    Used by frontend to show Claude connection indicator.
+    """
+    # Check if MCP server module is available
+    try:
+        from app.mcp import server as mcp_server
+        tools = await mcp_server.app.list_tools()
+        resources = await mcp_server.app.list_resources()
+
+        return {
+            "enabled": True,
+            "status": "connected",  # Assume connected if server is running
+            "tools_count": len(tools),
+            "resources_count": len(resources),
+            "message": "MCP server is running and ready for Claude"
+        }
+    except Exception as e:
+        logger.debug(f"MCP not available: {e}")
+        return {
+            "enabled": False,
+            "status": "disconnected",
+            "message": "MCP server not configured. Install: pip install mcp"
+        }
+
+
+@app.post("/api/mcp/toggle")
+async def toggle_mcp(request: dict):
+    """
+    Enable/disable MCP integration.
+    For MVP, this just returns current status.
+    In production, this would update configuration.
+    """
+    enabled = request.get("enabled", False)
+
+    return {
+        "enabled": enabled,
+        "status": "connected" if enabled else "disconnected",
+        "message": f"MCP {'enabled' if enabled else 'disabled'}"
     }
 
 

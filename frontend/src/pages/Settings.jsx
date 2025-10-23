@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { MCPStatusCard } from '../components/MCPIndicator';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
@@ -263,6 +264,11 @@ export default function Settings() {
             </button>
           ))}
         </div>
+      </div>
+
+      {/* MCP Status - Shows Claude connection status */}
+      <div className="mb-6">
+        <MCPStatusCard />
       </div>
 
       {/* Settings List */}

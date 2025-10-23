@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { MCPBanner } from '../components/MCPIndicator';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
@@ -309,6 +310,11 @@ export default function ChatSearch() {
               : 'Ask questions about your documents in natural language'
             }
           </p>
+        </div>
+
+        {/* MCP Banner - Shows when Claude is connected */}
+        <div className="px-6 pt-4">
+          <MCPBanner />
         </div>
 
         {/* Messages */}
