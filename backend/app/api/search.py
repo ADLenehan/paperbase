@@ -303,3 +303,75 @@ async def get_available_filters():
         return {"available_filters": []}
 
 
+@router.get("/index-stats")
+async def get_index_statistics():
+    """
+    Get Elasticsearch index statistics for monitoring and optimization.
+
+    Returns:
+        Document count, storage size, field count, and field limit utilization.
+
+    Useful for:
+    - Monitoring index health
+    - Detecting mapping explosion risk
+    - Capacity planning
+    """
+    elastic_service = ElasticsearchService()
+
+    try:
+        stats = await elastic_service.get_index_stats()
+
+        # Add health status based on utilization
+        field_utilization = stats["field_utilization_pct"]
+        if field_utilization >= 90:
+            health_status = "critical"
+            health_message = "Field limit nearly exhausted - risk of mapping explosion"
+        elif field_utilization >= 70:
+            health_status = "warning"
+            health_message = "Field count is high - monitor for unexpected growth"
+        else:
+            health_status = "healthy"
+            health_message = "Index is operating within normal parameters"
+
+        return {
+            **stats,
+            "health_status": health_status,
+            "health_message": health_message,
+            "recommendations": _get_index_recommendations(stats)
+        }
+
+    except Exception as e:
+        logger.error(f"Error getting index stats: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to get index statistics: {str(e)}")
+
+
+def _get_index_recommendations(stats: Dict[str, Any]) -> List[str]:
+    """Generate recommendations based on index statistics"""
+    recommendations = []
+
+    # Storage recommendations
+    if stats["storage_size_mb"] > 1000:
+        recommendations.append("Consider implementing index lifecycle management for large indices")
+
+    # Field count recommendations
+    if stats["field_utilization_pct"] > 70:
+        recommendations.append("Review schema definitions to remove unused fields")
+        recommendations.append("Consider consolidating similar fields across templates")
+
+    if stats["field_utilization_pct"] > 90:
+        recommendations.append("URGENT: Increase field limit or restructure schemas to avoid mapping rejection")
+
+    # Document count recommendations
+    if stats["document_count"] > 100000:
+        recommendations.append("Consider scaling to multiple shards for better performance")
+        recommendations.append("Enable replicas for production redundancy")
+
+    if stats["document_count"] > 1000000:
+        recommendations.append("Migrate to time-based indices for better manageability")
+
+    if not recommendations:
+        recommendations.append("Index is healthy - no action needed")
+
+    return recommendations
+
+
