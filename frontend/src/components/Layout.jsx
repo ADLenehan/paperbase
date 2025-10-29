@@ -1,5 +1,6 @@
 import { Outlet, Link, useLocation, useNavigate } from 'react-router-dom'
 import { useState, useEffect } from 'react'
+import MCPIndicator from './MCPIndicator'
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
 
@@ -114,7 +115,10 @@ function Layout() {
             </div>
 
             {/* Search Bar */}
-            <div className="flex items-center search-container relative">
+            <div className="flex items-center gap-4 search-container relative">
+              {/* MCP Indicator */}
+              <MCPIndicator />
+
               <form onSubmit={handleSearch} className="relative">
                 <input
                   type="text"
