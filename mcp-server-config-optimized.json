@@ -1,0 +1,424 @@
+{
+  "name": "paperbase-search",
+  "version": "2.0.0",
+  "description": "Paperbase Document Search and Analysis - Optimized for LLM consumption",
+  "server": {
+    "type": "http",
+    "url": "http://localhost:8000",
+    "health_endpoint": "/health"
+  },
+  "tool_selection_guide": {
+    "for_questions": "Use rag_query - answers with citations",
+    "for_finding": "Use search_documents - returns document list",
+    "for_reading": "Use get_document_content - returns full text",
+    "for_analytics": "Use multi_aggregate or get_dashboard_analytics",
+    "for_discovery": "Use list_fields or list_templates"
+  },
+  "tools": [
+    {
+      "name": "rag_query",
+      "priority": "PRIMARY",
+      "description": "🎯 PRIMARY TOOL: Answer questions about document content using RAG (Retrieval Augmented Generation). Searches documents, extracts relevant passages, and generates answer with citations. USE THIS FIRST when user asks content questions.",
+      "endpoint": "/api/mcp/search/rag/query",
+      "method": "POST",
+      "when_to_use": [
+        "User asks: 'What is the total contract value?'",
+        "User asks: 'Which documents mention X?'",
+        "User asks: 'Summarize findings about Y'",
+        "Any question requiring reading and understanding document content"
+      ],
+      "examples": [
+        {
+          "scenario": "User asks about data in documents",
+          "user_query": "What were the Q1 2024 revenues?",
+          "tool_call": {
+            "question": "What were the Q1 2024 revenues?",
+            "max_results": 5,
+            "filters": {"template": "Financial Reports"}
+          },
+          "returns": "Answer: 'Q1 2024 revenues were $2.3M...' with citations to source documents"
+        }
+      ],
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "question": {
+            "type": "string",
+            "description": "Question to answer (e.g., 'What is the contract value?', 'Which vendors are mentioned?')"
+          },
+          "max_results": {
+            "type": "integer",
+            "description": "Number of documents to use as context (default: 5)",
+            "default": 5,
+            "minimum": 1,
+            "maximum": 20
+          },
+          "filters": {
+            "type": "object",
+            "description": "Narrow search by field (e.g., {\"template\": \"Invoices\", \"vendor\": \"Acme\"})"
+          }
+        },
+        "required": ["question"]
+      },
+      "returns": {
+        "answer": "AI-generated answer based on document content",
+        "sources": "List of source documents with excerpts and relevance scores",
+        "metadata": "Query method and source count"
+      }
+    },
+    {
+      "name": "search_documents",
+      "priority": "PRIMARY",
+      "description": "🔍 FIND documents matching keywords or natural language query. Returns list of documents with metadata. Use when user wants to FIND or FILTER documents. Follow up with get_document_content to read.",
+      "endpoint": "/api/mcp/search/documents",
+      "method": "POST",
+      "when_to_use": [
+        "User says: 'Find all invoices from Acme'",
+        "User says: 'Show me contracts expiring in 2024'",
+        "Building a list of documents to process",
+        "Filtering before deeper analysis"
+      ],
+      "workflow": "search_documents → get_document_content → analyze",
+      "examples": [
+        {
+          "scenario": "Find specific documents",
+          "user_query": "Find all invoices over $1000",
+          "tool_call": {
+            "query": "invoices over $1000",
+            "max_results": 20,
+            "include_aggregations": true
+          },
+          "returns": "List of matching invoices with IDs, filenames, and extracted fields"
+        }
+      ],
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "Search query - natural language ('contracts expiring soon') or keywords ('invoice acme')"
+          },
+          "filters": {
+            "type": "object",
+            "description": "Filter by specific fields: {\"status\": \"completed\", \"template\": \"Invoices\"}"
+          },
+          "folder_path": {
+            "type": "string",
+            "description": "Search within folder: 'invoices/2024' or 'contracts/acme'"
+          },
+          "max_results": {
+            "type": "integer",
+            "description": "Maximum documents to return (default: 10)",
+            "default": 10,
+            "minimum": 1,
+            "maximum": 100
+          },
+          "include_aggregations": {
+            "type": "boolean",
+            "description": "Include summary statistics (counts, breakdowns)",
+            "default": false
+          }
+        },
+        "required": ["query"]
+      },
+      "returns": {
+        "documents": "List of matching documents with IDs and metadata",
+        "total": "Total number of matches",
+        "aggregations": "Summary stats (if requested)"
+      }
+    },
+    {
+      "name": "get_document_content",
+      "priority": "PRIMARY",
+      "description": "📄 READ complete document text and extracted fields. Use after search_documents to read full content, or when you have a specific document_id. Returns entire parsed text + structured data.",
+      "endpoint": "/api/mcp/search/document/{document_id}/content",
+      "method": "GET",
+      "when_to_use": [
+        "After search_documents returns results you want to read",
+        "User says: 'Read document #123' or 'Show me that contract'",
+        "Need full context for analysis or summarization",
+        "Extracting specific information from known document"
+      ],
+      "workflow": "Always call after search_documents when you need content",
+      "examples": [
+        {
+          "scenario": "Read document found by search",
+          "previous_step": "search_documents returned doc_id=456",
+          "tool_call": {"document_id": 456},
+          "returns": "Full text + extracted fields (vendor, amount, date, etc.)"
+        }
+      ],
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "document_id": {
+            "type": "integer",
+            "description": "Document ID (from search results or known ID)"
+          }
+        },
+        "required": ["document_id"]
+      },
+      "returns": {
+        "content": "Complete document text (can be very long)",
+        "extracted_fields": "Structured data extracted from document",
+        "metadata": "Upload date, template, status, confidence scores"
+      }
+    },
+    {
+      "name": "get_dashboard_analytics",
+      "priority": "SECONDARY",
+      "description": "📊 OVERVIEW: Get pre-computed statistics about document corpus. Returns counts, status breakdown, template usage, upload trends. Use for 'how many' or 'what types' questions.",
+      "endpoint": "/api/aggregations/dashboard",
+      "method": "GET",
+      "when_to_use": [
+        "User asks: 'How many documents do I have?'",
+        "User asks: 'What types of documents are there?'",
+        "User asks: 'Show me an overview'",
+        "Dashboard or high-level summary needed"
+      ],
+      "input_schema": {
+        "type": "object",
+        "properties": {}
+      },
+      "returns": {
+        "total_documents": "Total count",
+        "status_breakdown": "Documents by status (completed, processing, etc.)",
+        "template_usage": "Count by document type (Invoices, Contracts, etc.)",
+        "monthly_uploads": "Upload trend over time"
+      }
+    },
+    {
+      "name": "multi_aggregate",
+      "priority": "SECONDARY",
+      "description": "📈 CUSTOM ANALYTICS: Calculate statistics across multiple dimensions. Use for specific analytical questions requiring sum, average, count, grouping. More powerful than dashboard.",
+      "endpoint": "/api/aggregations/multi",
+      "method": "POST",
+      "when_to_use": [
+        "User asks: 'What's the average invoice amount?'",
+        "User asks: 'Total revenue by vendor?'",
+        "User asks: 'How many contracts per month?'",
+        "Custom metrics not available in dashboard"
+      ],
+      "examples": [
+        {
+          "scenario": "Calculate totals by category",
+          "user_query": "What's the total invoice amount by vendor?",
+          "tool_call": {
+            "aggregations": [
+              {"name": "by_vendor", "field": "vendor_name", "type": "terms"},
+              {"name": "amount_stats", "field": "total_amount", "type": "stats"}
+            ],
+            "filters": {"template": "Invoices"}
+          },
+          "returns": "Breakdown showing each vendor with their invoice total, count, average"
+        }
+      ],
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "aggregations": {
+            "type": "array",
+            "description": "List of aggregations to compute",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": {"type": "string", "description": "Result name"},
+                "field": {"type": "string", "description": "Field to aggregate"},
+                "type": {
+                  "type": "string",
+                  "description": "Aggregation type",
+                  "enum": ["terms", "stats", "sum", "avg", "cardinality", "date_histogram"]
+                },
+                "config": {"type": "object", "description": "Optional config (size, interval, etc.)"}
+              },
+              "required": ["name", "field", "type"]
+            }
+          },
+          "filters": {
+            "type": "object",
+            "description": "Filter documents before aggregating"
+          }
+        },
+        "required": ["aggregations"]
+      },
+      "returns": {
+        "results": "Aggregation results keyed by name",
+        "aggregation_count": "Number of aggregations computed"
+      }
+    },
+    {
+      "name": "list_fields",
+      "priority": "UTILITY",
+      "description": "🔍 DISCOVER schema: List all searchable fields across all document types. Use to understand what data is available before searching or aggregating. CALL THIS FIRST when exploring unfamiliar documents.",
+      "endpoint": "/api/mcp/search/fields",
+      "method": "GET",
+      "when_to_use": [
+        "Starting work on unfamiliar document set",
+        "User asks: 'What data do you have?' or 'What can I search for?'",
+        "Before constructing complex queries",
+        "When unsure what field names to use"
+      ],
+      "workflow": "Call first → Then use fields in search/aggregations",
+      "input_schema": {
+        "type": "object",
+        "properties": {}
+      },
+      "returns": {
+        "fields": "List of all fields with names, types, descriptions, aliases, and templates they appear in"
+      }
+    },
+    {
+      "name": "list_templates",
+      "priority": "UTILITY",
+      "description": "📑 DISCOVER document types: List available templates with their schemas. Use to understand what types of documents exist (Invoices, Contracts, etc.).",
+      "endpoint": "/api/mcp/search/templates",
+      "method": "GET",
+      "when_to_use": [
+        "User asks: 'What types of documents can you process?'",
+        "Understanding document categories",
+        "Before filtering by template"
+      ],
+      "input_schema": {
+        "type": "object",
+        "properties": {}
+      },
+      "returns": {
+        "templates": "List of document types with field schemas"
+      }
+    },
+    {
+      "name": "get_document_chunks",
+      "priority": "UTILITY",
+      "description": "📜 PAGINATE long documents: Get document in chunks. USE ONLY when get_document_content returns document too large for your context window. Supports overlapping chunks.",
+      "endpoint": "/api/mcp/search/document/{document_id}/chunks",
+      "method": "GET",
+      "when_to_use": [
+        "get_document_content returns >100k characters",
+        "Processing very long document section by section",
+        "Memory or context window constraints"
+      ],
+      "when_not_to_use": [
+        "Try get_document_content FIRST",
+        "Use rag_query if you just need specific info (it handles long docs automatically)"
+      ],
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "document_id": {"type": "integer"},
+          "chunk_size": {
+            "type": "integer",
+            "default": 2000,
+            "description": "Characters per chunk (100-10000)"
+          },
+          "page": {
+            "type": "integer",
+            "default": 1,
+            "description": "Which chunk to return (1-indexed)"
+          },
+          "overlap": {
+            "type": "integer",
+            "default": 200,
+            "description": "Character overlap between chunks for context"
+          }
+        },
+        "required": ["document_id"]
+      },
+      "returns": {
+        "chunk": "Requested chunk with text",
+        "pagination": "Current page, total chunks, has_next/previous"
+      }
+    },
+    {
+      "name": "get_document",
+      "priority": "UTILITY",
+      "description": "ℹ️ Get document metadata only (no content). Use when you need just the metadata without reading full text. For full text, use get_document_content instead.",
+      "endpoint": "/api/mcp/search/document/{document_id}",
+      "method": "GET",
+      "when_not_to_use": [
+        "Use get_document_content if you need to read the document"
+      ],
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "document_id": {"type": "integer"}
+        },
+        "required": ["document_id"]
+      }
+    },
+    {
+      "name": "get_search_stats",
+      "priority": "UTILITY",
+      "description": "📊 Get index health and statistics. Similar to get_dashboard_analytics but includes system health info.",
+      "endpoint": "/api/mcp/search/stats",
+      "method": "GET",
+      "input_schema": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "explain_query",
+      "priority": "DEBUG",
+      "description": "🔧 DEBUG: Explain how a query will be executed. Use for debugging or understanding query optimization. Shows ES query and confidence scores.",
+      "endpoint": "/api/mcp/search/query/explain",
+      "method": "POST",
+      "when_to_use": [
+        "Query not returning expected results",
+        "Understanding query optimization",
+        "Debugging search behavior"
+      ],
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "query": {"type": "string"}
+        },
+        "required": ["query"]
+      }
+    },
+    {
+      "name": "aggregate_field",
+      "priority": "UTILITY",
+      "description": "📊 Single field aggregation. Use multi_aggregate instead for multiple metrics. Kept for backward compatibility.",
+      "endpoint": "/api/mcp/search/aggregate",
+      "method": "POST",
+      "when_not_to_use": [
+        "Use multi_aggregate for better functionality"
+      ],
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "field": {"type": "string"},
+          "aggregation_type": {
+            "type": "string",
+            "enum": ["terms", "stats", "date_histogram", "cardinality"]
+          }
+        },
+        "required": ["field"]
+      }
+    }
+  ],
+  "recommended_workflows": {
+    "answer_question": [
+      "1. Use rag_query with user's question",
+      "Returns answer with citations - DONE"
+    ],
+    "find_and_analyze": [
+      "1. Use search_documents to find relevant docs",
+      "2. Use get_document_content on each result",
+      "3. Analyze content"
+    ],
+    "get_overview": [
+      "1. Use get_dashboard_analytics for counts",
+      "2. Use list_templates to see document types",
+      "3. Use search_documents to sample docs"
+    ],
+    "calculate_metrics": [
+      "1. Use multi_aggregate with appropriate aggregation types",
+      "Returns computed metrics"
+    ]
+  },
+  "authentication": {
+    "type": "none",
+    "note": "Add API key auth for production"
+  }
+}

@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import settings
 from app.core.database import engine, Base
 from app.core.error_handlers import register_error_handlers
-from app.api import onboarding, documents, search, verification, analytics, templates, bulk_upload, rematch, extractions, folders, nl_query, audit, files, settings as settings_api, export
+from app.api import onboarding, documents, search, verification, analytics, templates, bulk_upload, rematch, extractions, folders, nl_query, audit, files, settings as settings_api, export, aggregations, mcp_search
 import logging
 
 # Configure logging
@@ -44,6 +44,8 @@ app.include_router(nl_query.router)  # Natural language query interface
 app.include_router(audit.router)  # HITL audit interface
 app.include_router(files.router)  # File serving for PDF preview
 app.include_router(export.router)  # Export functionality (CSV, Excel, JSON)
+app.include_router(aggregations.router)  # Comprehensive aggregations API
+app.include_router(mcp_search.router)  # MCP server search interface
 app.include_router(onboarding.router)
 app.include_router(documents.router)
 app.include_router(search.router)

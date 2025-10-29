@@ -1,0 +1,283 @@
+{
+  "name": "paperbase-search",
+  "version": "1.0.0",
+  "description": "Paperbase Document Search and Aggregation MCP Server",
+  "server": {
+    "type": "http",
+    "url": "http://localhost:8000",
+    "health_endpoint": "/health"
+  },
+  "tools": [
+    {
+      "name": "search_documents",
+      "description": "Search documents using natural language or keyword queries with optional filters and aggregations",
+      "endpoint": "/api/mcp/search/documents",
+      "method": "POST",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "Search query (natural language or keywords)"
+          },
+          "filters": {
+            "type": "object",
+            "description": "Optional filters as key-value pairs",
+            "additionalProperties": true
+          },
+          "folder_path": {
+            "type": "string",
+            "description": "Restrict search to specific folder path"
+          },
+          "max_results": {
+            "type": "integer",
+            "description": "Maximum results to return (1-100)",
+            "default": 10,
+            "minimum": 1,
+            "maximum": 100
+          },
+          "include_aggregations": {
+            "type": "boolean",
+            "description": "Include aggregation summaries in response",
+            "default": false
+          }
+        },
+        "required": ["query"]
+      }
+    },
+    {
+      "name": "get_document",
+      "description": "Get a single document by ID with full details including all extracted fields",
+      "endpoint": "/api/mcp/search/document/{document_id}",
+      "method": "GET",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "document_id": {
+            "type": "integer",
+            "description": "Document ID to retrieve"
+          }
+        },
+        "required": ["document_id"]
+      }
+    },
+    {
+      "name": "aggregate_field",
+      "description": "Execute aggregation queries on document fields for analytics",
+      "endpoint": "/api/mcp/search/aggregate",
+      "method": "POST",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "field": {
+            "type": "string",
+            "description": "Field name to aggregate"
+          },
+          "aggregation_type": {
+            "type": "string",
+            "description": "Type of aggregation",
+            "enum": ["terms", "stats", "date_histogram", "cardinality", "range", "histogram", "percentiles"],
+            "default": "terms"
+          },
+          "filters": {
+            "type": "object",
+            "description": "Optional filters to apply before aggregation",
+            "additionalProperties": true
+          },
+          "config": {
+            "type": "object",
+            "description": "Additional aggregation configuration",
+            "additionalProperties": true
+          }
+        },
+        "required": ["field"]
+      }
+    },
+    {
+      "name": "list_fields",
+      "description": "List all available searchable fields across all document templates",
+      "endpoint": "/api/mcp/search/fields",
+      "method": "GET",
+      "input_schema": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "list_templates",
+      "description": "List all available document templates with their schemas",
+      "endpoint": "/api/mcp/search/templates",
+      "method": "GET",
+      "input_schema": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "get_search_stats",
+      "description": "Get overall statistics about documents and search index",
+      "endpoint": "/api/mcp/search/stats",
+      "method": "GET",
+      "input_schema": {
+        "type": "object",
+        "properties": {}
+      }
+    },
+    {
+      "name": "explain_query",
+      "description": "Explain how a natural language query will be executed (debugging tool)",
+      "endpoint": "/api/mcp/search/query/explain",
+      "method": "POST",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "Natural language query to explain"
+          }
+        },
+        "required": ["query"]
+      }
+    },
+    {
+      "name": "get_document_content",
+      "description": "Get full document content for LLM analysis - returns complete parsed text",
+      "endpoint": "/api/mcp/search/document/{document_id}/content",
+      "method": "GET",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "document_id": {
+            "type": "integer",
+            "description": "Document ID to retrieve content for"
+          }
+        },
+        "required": ["document_id"]
+      }
+    },
+    {
+      "name": "get_document_chunks",
+      "description": "Get document content in chunks for processing long documents",
+      "endpoint": "/api/mcp/search/document/{document_id}/chunks",
+      "method": "GET",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "document_id": {
+            "type": "integer",
+            "description": "Document ID"
+          },
+          "chunk_size": {
+            "type": "integer",
+            "description": "Characters per chunk (100-10000)",
+            "default": 2000,
+            "minimum": 100,
+            "maximum": 10000
+          },
+          "page": {
+            "type": "integer",
+            "description": "Chunk number to retrieve (1-indexed)",
+            "default": 1,
+            "minimum": 1
+          },
+          "overlap": {
+            "type": "integer",
+            "description": "Character overlap between chunks",
+            "default": 200,
+            "minimum": 0,
+            "maximum": 1000
+          }
+        },
+        "required": ["document_id"]
+      }
+    },
+    {
+      "name": "rag_query",
+      "description": "Answer questions using document corpus (RAG) - returns answer with source citations",
+      "endpoint": "/api/mcp/search/rag/query",
+      "method": "POST",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "question": {
+            "type": "string",
+            "description": "Question to answer based on documents"
+          },
+          "max_results": {
+            "type": "integer",
+            "description": "Maximum number of documents to use as context",
+            "default": 5,
+            "minimum": 1,
+            "maximum": 20
+          },
+          "filters": {
+            "type": "object",
+            "description": "Optional filters to narrow document search",
+            "additionalProperties": true
+          }
+        },
+        "required": ["question"]
+      }
+    },
+    {
+      "name": "multi_aggregate",
+      "description": "Execute multiple aggregations in a single query for comprehensive analytics",
+      "endpoint": "/api/aggregations/multi",
+      "method": "POST",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "aggregations": {
+            "type": "array",
+            "description": "List of aggregation definitions",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "description": "Aggregation name for result"
+                },
+                "field": {
+                  "type": "string",
+                  "description": "Field to aggregate"
+                },
+                "type": {
+                  "type": "string",
+                  "description": "Aggregation type"
+                },
+                "config": {
+                  "type": "object",
+                  "description": "Optional configuration"
+                }
+              },
+              "required": ["name", "field", "type"]
+            }
+          },
+          "filters": {
+            "type": "object",
+            "description": "Optional filters"
+          }
+        },
+        "required": ["aggregations"]
+      }
+    },
+    {
+      "name": "get_dashboard_analytics",
+      "description": "Get pre-configured dashboard aggregations for common analytics",
+      "endpoint": "/api/aggregations/dashboard",
+      "method": "GET",
+      "input_schema": {
+        "type": "object",
+        "properties": {}
+      }
+    }
+  ],
+  "authentication": {
+    "type": "none",
+    "note": "Add authentication when deploying to production"
+  },
+  "rate_limiting": {
+    "enabled": false,
+    "requests_per_minute": 60
+  }
+}
