@@ -91,6 +91,12 @@ class ReductoService:
                 f"{num_chunks} chunks, avg confidence: {avg_confidence:.3f}"
             )
 
+            # DEBUG: Log first chunk structure to understand data format
+            if num_chunks > 0 and isinstance(result, dict):
+                first_chunk = result.get("chunks", [])[0]
+                logger.debug(f"First chunk keys: {list(first_chunk.keys())}")
+                logger.debug(f"First chunk content sample: {str(first_chunk)[:300]}")
+
             return {
                 "result": result,
                 "confidence_scores": confidence_scores,
@@ -119,7 +125,7 @@ class ReductoService:
         This reduces costs by ~50% and improves latency.
 
         Args:
-            schema: Extraction schema with fields and hints
+            schema: Extraction schema with fields and hints (supports complex types)
             file_path: Path to document (if not using job_id)
             job_id: Job ID from previous parse (preferred - uses jobid:// pipeline)
 
@@ -127,10 +133,11 @@ class ReductoService:
             {
                 "extractions": {
                     "field_name": {
-                        "value": "...",
+                        "value": "..." | [...] | {...},  # Supports complex types
                         "confidence": 0.85,
                         "source_page": 1,
-                        "source_bbox": [x, y, width, height]
+                        "source_bbox": [x, y, width, height],
+                        "field_type": "text|array|table|array_of_objects"
                     }
                 },
                 "job_id": "..."
@@ -143,7 +150,9 @@ class ReductoService:
         if not file_path and not job_id:
             raise FileUploadError("Must provide either file_path or job_id")
 
-        num_fields = len(schema.get("fields", schema.get("properties", {}).keys()))
+        # Convert our schema format to Reducto's JSON Schema format
+        reducto_schema = self._convert_to_reducto_schema(schema)
+        num_fields = len(schema.get("fields", []))
 
         try:
             # PIPELINE OPTIMIZATION: Use jobid:// if we have a parse job_id
@@ -163,18 +172,51 @@ class ReductoService:
                 upload_response = await asyncio.to_thread(upload_file)
                 document_url = upload_response.file_id
 
-            # Extract using the document URL (either jobid:// or file_id)
+            # Determine if we need array extraction mode for tables/long lists
+            has_tables = any(f.get("type") == "table" for f in schema.get("fields", []))
+            has_arrays = any(f.get("type") in ["array", "array_of_objects"] for f in schema.get("fields", []))
+
+            # Extract using the document URL with appropriate settings
+            logger.info(f"Calling Reducto extract API with {num_fields} fields (tables={has_tables}, arrays={has_arrays})")
+
+            # Build extract parameters for Reducto SDK v0.11.0
+            # Required: document_url, schema
+            # Optional: system_prompt, array_extract, generate_citations, etc.
+            extract_kwargs = {
+                "document_url": document_url,
+                "schema": reducto_schema,
+                "system_prompt": "Be precise and thorough. Extract all data maintaining structure and format.",
+                "generate_citations": True  # Enable bbox/page info
+            }
+
+            # Enable array extraction for tables and arrays
+            if has_tables or has_arrays:
+                extract_kwargs["array_extract"] = {
+                    "enabled": True,
+                    "mode": "auto"
+                }
+
             extract_response = await asyncio.to_thread(
                 self.client.extract.run,
-                document_url=document_url,
-                schema=schema
+                **extract_kwargs
             )
 
-            result = extract_response.result if hasattr(extract_response, 'result') else extract_response
-            raw_extractions = result if isinstance(result, list) else result.get("extractions", {})
+            logger.info(f"Reducto response type: {type(extract_response)}")
 
-            # Parse extractions to include bbox and page information
-            extractions = self._parse_extraction_with_bbox(raw_extractions)
+            result = extract_response.result if hasattr(extract_response, 'result') else extract_response
+            logger.info(f"Result type: {type(result)}")
+
+            raw_extractions = result if isinstance(result, list) else result.get("extractions", result)
+            logger.info(f"Raw extractions type: {type(raw_extractions)}, Length: {len(raw_extractions) if isinstance(raw_extractions, (list, dict)) else 0}")
+
+            # Parse citations to get confidence scores and bbox data
+            citations_data = {}
+            if hasattr(extract_response, 'citations') and extract_response.citations:
+                citations_data = self._parse_citations(extract_response.citations)
+                logger.info(f"Parsed {len(citations_data)} citations with confidence scores")
+
+            # Parse extractions to include bbox, page, and type information
+            extractions = self._parse_extraction_with_complex_types(raw_extractions, schema, citations_data)
 
             logger.info(
                 f"Structured extraction completed - "
@@ -313,13 +355,22 @@ class ReductoService:
 
         # Handle list format (array of extraction objects)
         if isinstance(raw_extractions, list):
-            for extraction in raw_extractions:
+            logger.info(f"Parsing list with {len(raw_extractions)} items")
+            for idx, extraction in enumerate(raw_extractions):
+                logger.info(f"Item {idx}: type={type(extraction)}, keys={extraction.keys() if isinstance(extraction, dict) else 'N/A'}")
                 if not isinstance(extraction, dict):
                     continue
 
+                # Check if this is a dict with field names as keys (Reducto format)
                 field_name = extraction.get("field", extraction.get("name"))
                 if not field_name:
-                    continue
+                    # This is a dict like {"style_number": "...", "season": "..."}
+                    # Parse it as field dict (the actual extracted data!)
+                    logger.info(f"List item {idx} has no 'field' or 'name' key - this IS the field data dict")
+                    # Recursively call this function with the dict
+                    parsed_dict = self._parse_extraction_with_bbox(extraction)
+                    logger.info(f"Parsed {len(parsed_dict)} fields from embedded dict")
+                    return parsed_dict  # Return immediately - this is the actual data
 
                 # Extract value (may be nested)
                 value = extraction.get("value", extraction.get("content", ""))
@@ -344,6 +395,7 @@ class ReductoService:
 
         # Handle dict format (field_name: data)
         elif isinstance(raw_extractions, dict):
+            logger.info(f"Parsing dict with {len(raw_extractions)} fields")
             for field_name, field_data in raw_extractions.items():
                 # Check if already structured
                 if isinstance(field_data, dict):
@@ -354,17 +406,307 @@ class ReductoService:
                     bbox = field_data.get("bbox", field_data.get("bounding_box"))
                     page = field_data.get("page", field_data.get("page_number", 1))
                 else:
-                    # Simple value format
+                    # Simple value format: "field_name": "value"
                     value = field_data
                     confidence = 0.85
                     bbox = None
                     page = None
 
+                logger.debug(f"  {field_name}: value='{value}', confidence={confidence}")
                 parsed[field_name] = {
                     "value": str(value) if value is not None else "",
                     "confidence": float(confidence) if confidence is not None else 0.85,
                     "source_page": int(page) if page is not None else None,
                     "source_bbox": bbox if bbox else None
+                }
+
+            logger.info(f"Dict parsing complete: {len(parsed)} fields with values")
+
+        return parsed
+
+    def _convert_to_reducto_schema(self, schema: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Convert our schema format to Reducto's JSON Schema format.
+
+        Handles complex types: array, table, array_of_objects
+
+        Args:
+            schema: Our schema with fields list
+
+        Returns:
+            Reducto-compatible JSON Schema
+        """
+        def map_type_to_json_schema(field_type: str) -> str:
+            """Map our internal types to JSON Schema types."""
+            type_map = {
+                "text": "string",
+                "number": "number",
+                "boolean": "boolean",
+                "date": "string",  # Use string with format
+            }
+            return type_map.get(field_type, "string")
+
+        reducto_schema = {
+            "type": "object",
+            "properties": {},
+            "required": []
+        }
+
+        for field in schema.get("fields", []):
+            field_name = field["name"]
+            field_type = field.get("type", "text")
+            required = field.get("required", False)
+
+            if required:
+                reducto_schema["required"].append(field_name)
+
+            # Map our types to JSON Schema types
+            if field_type == "text":
+                reducto_schema["properties"][field_name] = {
+                    "type": "string",
+                    "description": " ".join(field.get("extraction_hints", []))
+                }
+            elif field_type == "number":
+                reducto_schema["properties"][field_name] = {
+                    "type": "number",
+                    "description": " ".join(field.get("extraction_hints", []))
+                }
+            elif field_type == "boolean":
+                reducto_schema["properties"][field_name] = {
+                    "type": "boolean",
+                    "description": " ".join(field.get("extraction_hints", []))
+                }
+            elif field_type == "date":
+                reducto_schema["properties"][field_name] = {
+                    "type": "string",
+                    "format": "date",
+                    "description": " ".join(field.get("extraction_hints", []))
+                }
+            elif field_type == "array":
+                # Simple array (list of strings or numbers)
+                item_type = field.get("item_type", "text")  # Get our internal type
+                json_item_type = map_type_to_json_schema(item_type)  # Convert to JSON Schema type
+                reducto_schema["properties"][field_name] = {
+                    "type": "array",
+                    "items": {"type": json_item_type},
+                    "description": " ".join(field.get("extraction_hints", []))
+                }
+            elif field_type == "array_of_objects":
+                # Array of structured objects (e.g., invoice line items)
+                object_schema = field.get("object_schema", {})
+                properties = {}
+                for obj_field_name, obj_field_def in object_schema.items():
+                    obj_type = obj_field_def.get("type", "text")
+                    json_obj_type = map_type_to_json_schema(obj_type)
+                    properties[obj_field_name] = {"type": json_obj_type}
+
+                reducto_schema["properties"][field_name] = {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": properties
+                    },
+                    "description": " ".join(field.get("extraction_hints", []))
+                }
+            elif field_type == "table":
+                # Table with dynamic columns (e.g., grading specs)
+                table_schema = field.get("table_schema", {})
+                row_identifier = table_schema.get("row_identifier", "id")
+                columns = table_schema.get("columns", [])
+                value_type = table_schema.get("value_type", "text")
+                json_value_type = map_type_to_json_schema(value_type)
+
+                # Build table as array of objects
+                properties = {row_identifier: {"type": "string"}}
+                for col in columns:
+                    properties[col] = {"type": json_value_type}
+
+                reducto_schema["properties"][field_name] = {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": properties
+                    },
+                    "description": " ".join(field.get("extraction_hints", []))
+                }
+
+        return reducto_schema
+
+    def _parse_citations(self, citations: Any) -> Dict[str, Dict[str, Any]]:
+        """
+        Parse Reducto citations to extract confidence scores and bbox data.
+
+        Args:
+            citations: Citations array from Reducto extract response
+
+        Returns:
+            Dict mapping field names to their citation metadata:
+            {
+                "field_name": {
+                    "confidence": 0.96,
+                    "bbox": {...},
+                    "page": 2
+                }
+            }
+        """
+        parsed_citations = {}
+
+        # Handle Pydantic model
+        if hasattr(citations, 'model_dump'):
+            citations = citations.model_dump()
+        elif hasattr(citations, 'dict'):
+            citations = citations.dict()
+
+        # Citations format: [{"field_name": [{"content": "...", "bbox": {...}, "confidence": "high", ...}]}]
+        if isinstance(citations, list) and citations:
+            for citation_obj in citations:
+                if isinstance(citation_obj, dict):
+                    for field_name, citation_list in citation_obj.items():
+                        if isinstance(citation_list, list) and citation_list:
+                            # Get first citation for this field
+                            first_citation = citation_list[0]
+
+                            # Handle case where citation might not be a dict (e.g., nested arrays)
+                            if not isinstance(first_citation, dict):
+                                continue
+
+                            # Extract confidence (use parse_confidence if available)
+                            granular_conf = first_citation.get("granular_confidence", {}) or {}
+                            confidence = None
+                            if isinstance(granular_conf, dict):
+                                confidence = granular_conf.get("parse_confidence")
+
+                            # Fallback to categorical confidence if no numeric available
+                            if confidence is None:
+                                cat_conf = first_citation.get("confidence", "high")
+                                confidence = {"high": 0.9, "medium": 0.7, "low": 0.5}.get(cat_conf, 0.85)
+
+                            # Extract bbox and page
+                            bbox = first_citation.get("bbox", {})
+
+                            parsed_citations[field_name] = {
+                                "confidence": float(confidence),
+                                "bbox": bbox if isinstance(bbox, dict) else {},
+                                "page": bbox.get("page", 1) if isinstance(bbox, dict) else 1
+                            }
+
+        return parsed_citations
+
+    def _parse_extraction_with_complex_types(
+        self,
+        raw_extractions: Any,
+        schema: Dict[str, Any],
+        citations_data: Optional[Dict[str, Dict[str, Any]]] = None
+    ) -> Dict[str, Any]:
+        """
+        Parse Reducto extraction response handling complex types (arrays, tables).
+
+        Args:
+            raw_extractions: Raw extraction response from Reducto
+            schema: Our schema with type information
+            citations_data: Optional citation metadata with confidence scores
+
+        Returns:
+            Dict with normalized structure including complex types
+        """
+        if citations_data is None:
+            citations_data = {}
+
+        # Build field type map
+        field_types = {}
+        for field in schema.get("fields", []):
+            field_types[field["name"]] = field.get("type", "text")
+
+        parsed = {}
+
+        # Handle dict format (most common)
+        if isinstance(raw_extractions, dict):
+            for field_name, field_data in raw_extractions.items():
+                field_type = field_types.get(field_name, "text")
+
+                # Extract value and metadata
+                if isinstance(field_data, dict) and "value" in field_data:
+                    value = field_data["value"]
+                    confidence = field_data.get("confidence", 0.85)
+                    bbox = field_data.get("bbox")
+                    page = field_data.get("page", 1)
+                else:
+                    value = field_data
+                    confidence = 0.85
+                    bbox = None
+                    page = None
+
+                # Override with citations data if available (more accurate)
+                if field_name in citations_data:
+                    citation = citations_data[field_name]
+                    confidence = citation.get("confidence", confidence)
+                    bbox = citation.get("bbox", bbox)
+                    page = citation.get("page", page)
+
+                # Handle complex types
+                if field_type in ["array", "array_of_objects", "table"]:
+                    # Value should already be a list
+                    if not isinstance(value, list):
+                        value = []
+
+                    # Calculate per-item/row confidence if available
+                    if isinstance(value, list) and value:
+                        item_confidences = []
+                        for item in value:
+                            if isinstance(item, dict) and "confidence" in item:
+                                item_confidences.append(item["confidence"])
+                        avg_confidence = sum(item_confidences) / len(item_confidences) if item_confidences else confidence
+                    else:
+                        avg_confidence = confidence
+
+                    parsed[field_name] = {
+                        "value": value,  # Keep as list/array
+                        "field_type": field_type,
+                        "confidence": float(avg_confidence),
+                        "source_page": int(page) if page else None,
+                        "source_bbox": bbox
+                    }
+                else:
+                    # Simple type
+                    parsed[field_name] = {
+                        "value": str(value) if value is not None else "",
+                        "field_type": field_type,
+                        "confidence": float(confidence),
+                        "source_page": int(page) if page else None,
+                        "source_bbox": bbox
+                    }
+
+        # Handle list format
+        elif isinstance(raw_extractions, list):
+            # Check if list contains a single dict with field names as keys (new Reducto format)
+            if (len(raw_extractions) == 1 and
+                isinstance(raw_extractions[0], dict) and
+                not any(k in raw_extractions[0] for k in ["field", "name", "value"])):
+                # New format: [{"product_name": "Pinecone", "cloud_platform": "AWS", ...}]
+                # Recursively call this function with the dict
+                return self._parse_extraction_with_complex_types(raw_extractions[0], schema, citations_data)
+
+            # Old format: [{"field": "product_name", "value": "...", ...}, ...]
+            for extraction in raw_extractions:
+                if not isinstance(extraction, dict):
+                    continue
+
+                field_name = extraction.get("field", extraction.get("name"))
+                if not field_name:
+                    continue
+
+                field_type = field_types.get(field_name, "text")
+                value = extraction.get("value", "")
+                confidence = extraction.get("confidence", 0.85)
+                bbox = extraction.get("bbox")
+                page = extraction.get("page", 1)
+
+                parsed[field_name] = {
+                    "value": value if field_type in ["array", "array_of_objects", "table"] else str(value),
+                    "field_type": field_type,
+                    "confidence": float(confidence),
+                    "source_page": int(page) if page else None,
+                    "source_bbox": bbox
                 }
 
         return parsed

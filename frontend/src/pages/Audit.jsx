@@ -1,6 +1,11 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
-import PDFViewer from '../components/PDFViewer';
+import DocumentViewer from '../components/DocumentViewer';
+import AuditTableView from '../components/AuditTableView';
+import ComplexFieldDisplay from '../components/ComplexFieldDisplay';
+import ArrayEditor from '../components/ArrayEditor';
+import TableEditor from '../components/TableEditor';
+import ArrayOfObjectsEditor from '../components/ArrayOfObjectsEditor';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
@@ -8,6 +13,7 @@ export default function Audit() {
   const { documentId } = useParams();
   const [searchParams] = useSearchParams();
   const templateId = searchParams.get('template_id');
+  const mode = searchParams.get('mode'); // NEW: 'table' or null (single field mode)
 
   const [queue, setQueue] = useState([]);
   const [currentIndex, setCurrentIndex] = useState(0);
@@ -16,6 +22,12 @@ export default function Audit() {
   const [verifying, setVerifying] = useState(false);
   const [correctionValue, setCorrectionValue] = useState('');
   const [showCorrectionInput, setShowCorrectionInput] = useState(false);
+  const [isEditingComplexField, setIsEditingComplexField] = useState(false);
+
+  // NEW: Table mode state
+  const [viewMode, setViewMode] = useState(mode === 'table' ? 'table' : 'single');
+  const [tableDocuments, setTableDocuments] = useState([]);
+  const [tableSchema, setTableSchema] = useState(null);
 
   // PDF viewer state
   const [currentPage, setCurrentPage] = useState(1);
@@ -30,8 +42,12 @@ export default function Audit() {
   });
 
   useEffect(() => {
-    fetchQueue();
-  }, [documentId, templateId]);
+    if (viewMode === 'table' && templateId) {
+      fetchTableData(templateId);
+    } else {
+      fetchQueue();
+    }
+  }, [documentId, templateId, viewMode]);
 
   useEffect(() => {
     if (queue.length > 0 && currentIndex < queue.length) {
@@ -140,38 +156,55 @@ export default function Audit() {
     setCurrentIndex(prev => prev + 1);
   };
 
-  // Keyboard shortcuts
-  useEffect(() => {
-    const handleKeyPress = (e) => {
-      // Don't trigger if user is typing in an input
-      if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') {
-        return;
+  // NEW: Table mode functions
+  const fetchTableData = async (schemaId) => {
+    setLoading(true);
+    try {
+      // Fetch schema
+      const schemaRes = await fetch(`${API_URL}/api/onboarding/schemas/${schemaId}`);
+      if (!schemaRes.ok) throw new Error('Schema not found');
+      const schema = await schemaRes.json();
+      setTableSchema(schema);
+
+      // Fetch documents with this schema
+      const docsRes = await fetch(`${API_URL}/api/documents?schema_id=${schemaId}`);
+      if (!docsRes.ok) throw new Error('Documents not found');
+      const docsData = await docsRes.json();
+      setTableDocuments(docsData.documents || []);
+    } catch (error) {
+      console.error('Error fetching table data:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleBulkVerify = async (verifications) => {
+    setVerifying(true);
+    try {
+      const response = await fetch(`${API_URL}/api/audit/bulk-verify`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ verifications })
+      });
+
+      if (!response.ok) throw new Error('Bulk verification failed');
+
+      const result = await response.json();
+
+      // Refresh table data
+      if (tableSchema) {
+        await fetchTableData(tableSchema.id);
       }
 
-      switch (e.key) {
-        case '1':
-        case 'Enter':
-          if (!verifying) handleCorrect();
-          break;
-        case '2':
-          setShowCorrectionInput(true);
-          break;
-        case '3':
-          if (!verifying) handleNotFound();
-          break;
-        case 's':
-        case 'S':
-          handleSkip();
-          break;
-        case '?':
-          // Show help (TODO: implement help modal)
-          break;
-      }
-    };
+      alert(`Successfully verified ${result.results.successful} of ${result.results.total} fields`);
+    } catch (error) {
+      console.error('Bulk verification error:', error);
+      alert('Failed to verify fields. Please try again.');
+    } finally {
+      setVerifying(false);
+    }
+  };
 
-    window.addEventListener('keydown', handleKeyPress);
-    return () => window.removeEventListener('keydown', handleKeyPress);
-  }, [verifying, correctionValue]);
 
   if (loading) {
     return (
@@ -252,34 +285,74 @@ export default function Audit() {
       {/* Header */}
       <div className="bg-white border-b border-gray-200 px-6 py-4">
         <div className="flex items-center justify-between mb-2">
-          <h1 className="text-2xl font-bold text-gray-900">Audit Queue</h1>
-          <span className="text-sm text-gray-600">
-            {currentIndex + 1} of {queue.length}
-          </span>
+          <h1 className="text-2xl font-bold text-gray-900">
+            {viewMode === 'table' ? 'Bulk Review' : 'Audit Queue'}
+          </h1>
+          <div className="flex items-center gap-4">
+            {/* NEW: Mode Toggle */}
+            {templateId && (
+              <button
+                onClick={() => setViewMode(viewMode === 'table' ? 'single' : 'table')}
+                className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                {viewMode === 'table' ? '👁️ Single Field Mode' : '📊 Table Mode'}
+              </button>
+            )}
+            {viewMode === 'single' && (
+              <span className="text-sm text-gray-600">
+                {currentIndex + 1} of {queue.length}
+              </span>
+            )}
+          </div>
         </div>
 
-        {/* Progress Bar */}
-        <div className="w-full bg-gray-200 rounded-full h-2">
-          <div
-            className="bg-blue-600 h-2 rounded-full transition-all duration-300"
-            style={{ width: `${((currentIndex) / queue.length) * 100}%` }}
-          />
-        </div>
+        {/* Progress Bar - Single Mode Only */}
+        {viewMode === 'single' && (
+          <>
+            <div className="w-full bg-gray-200 rounded-full h-2">
+              <div
+                className="bg-blue-600 h-2 rounded-full transition-all duration-300"
+                style={{ width: `${((currentIndex) / queue.length) * 100}%` }}
+              />
+            </div>
 
-        {/* Session Stats */}
-        <div className="flex items-center gap-4 mt-3 text-xs text-gray-600">
-          <span>✓ {sessionStats.correct} correct</span>
-          <span>✏️ {sessionStats.corrected} corrected</span>
-          <span>⊘ {sessionStats.notFound} not found</span>
-        </div>
+            {/* Session Stats */}
+            <div className="flex items-center gap-4 mt-3 text-xs text-gray-600">
+              <span>✓ {sessionStats.correct} correct</span>
+              <span>✏️ {sessionStats.corrected} corrected</span>
+              <span>⊘ {sessionStats.notFound} not found</span>
+            </div>
+          </>
+        )}
       </div>
 
-      {/* Main Content */}
-      <div className="flex-1 flex overflow-hidden">
-        {/* Left: PDF Viewer */}
+      {/* Main Content - Conditional Rendering */}
+      {viewMode === 'table' ? (
+        /* NEW: Table Mode */
+        <div className="flex-1 overflow-auto p-6">
+          {loading ? (
+            <div className="flex items-center justify-center h-64">
+              <div className="text-gray-500">Loading...</div>
+            </div>
+          ) : (
+            <AuditTableView
+              documents={tableDocuments}
+              schema={tableSchema}
+              onVerify={handleBulkVerify}
+              isVerifying={verifying}
+              showActions={true}
+              onCancel={() => setViewMode('single')}
+            />
+          )}
+        </div>
+      ) : (
+        /* Original: Single Field Mode */
+        <div className="flex-1 flex overflow-hidden">
+        {/* Left: Document Viewer */}
         <div className="flex-1 p-6">
-          <PDFViewer
+          <DocumentViewer
             fileUrl={fileUrl}
+            filename={currentItem.filename}
             page={currentPage}
             highlights={highlights}
             onPageChange={setCurrentPage}
@@ -318,9 +391,66 @@ export default function Audit() {
           <div className="mb-6">
             <label className="text-xs text-gray-500 mb-1 block">Extracted Value:</label>
             <div className="bg-gray-50 border border-gray-200 rounded-lg p-3">
-              <p className="font-mono text-sm text-gray-900">
-                {currentItem.field_value || '(not extracted)'}
-              </p>
+              {currentItem.field_type && ['array', 'table', 'array_of_objects'].includes(currentItem.field_type) ? (
+                <div>
+                  {isEditingComplexField ? (
+                    <div className="space-y-3">
+                      {currentItem.field_type === 'array' && (
+                        <ArrayEditor
+                          value={currentItem.field_value_json || []}
+                          onChange={(newValue) => setCorrectionValue(JSON.stringify(newValue))}
+                        />
+                      )}
+                      {currentItem.field_type === 'table' && (
+                        <TableEditor
+                          value={currentItem.field_value_json || { headers: [], rows: [] }}
+                          onChange={(newValue) => setCorrectionValue(JSON.stringify(newValue))}
+                        />
+                      )}
+                      {currentItem.field_type === 'array_of_objects' && (
+                        <ArrayOfObjectsEditor
+                          value={currentItem.field_value_json || []}
+                          onChange={(newValue) => setCorrectionValue(JSON.stringify(newValue))}
+                        />
+                      )}
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => setIsEditingComplexField(false)}
+                          className="px-3 py-1.5 text-sm border border-gray-300 rounded hover:bg-gray-50 transition-colors"
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          onClick={() => {
+                            setShowCorrectionInput(true);
+                            setIsEditingComplexField(false);
+                          }}
+                          className="px-3 py-1.5 text-sm bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors"
+                        >
+                          Apply Changes
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      <ComplexFieldDisplay
+                        field={currentItem}
+                        mode="expanded"
+                      />
+                      <button
+                        onClick={() => setIsEditingComplexField(true)}
+                        className="text-xs text-blue-600 hover:text-blue-700 hover:underline"
+                      >
+                        Edit
+                      </button>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <p className="font-mono text-sm text-gray-900">
+                  {currentItem.field_value || '(not extracted)'}
+                </p>
+              )}
             </div>
           </div>
 
@@ -374,7 +504,7 @@ export default function Audit() {
               disabled={verifying}
               className="w-full bg-green-600 text-white py-3 px-4 rounded-lg font-medium hover:bg-green-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              ✓ Correct <span className="text-xs opacity-75">(1 or Enter)</span>
+              ✓ Correct
             </button>
 
             {/* Correction Input */}
@@ -407,7 +537,7 @@ export default function Audit() {
                 disabled={verifying}
                 className="w-full bg-blue-600 text-white py-3 px-4 rounded-lg font-medium hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                ✗ Fix Value <span className="text-xs opacity-75">(2)</span>
+                ✗ Fix Value
               </button>
             )}
 
@@ -417,7 +547,7 @@ export default function Audit() {
               disabled={verifying}
               className="w-full bg-yellow-600 text-white py-3 px-4 rounded-lg font-medium hover:bg-yellow-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              ⊘ Not Found <span className="text-xs opacity-75">(3)</span>
+              ⊘ Not Found
             </button>
 
             {/* Skip */}
@@ -426,22 +556,12 @@ export default function Audit() {
               disabled={verifying}
               className="w-full bg-gray-200 text-gray-700 py-3 px-4 rounded-lg font-medium hover:bg-gray-300 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              Skip <span className="text-xs opacity-75">(S)</span>
+              Skip
             </button>
           </div>
-
-          {/* Keyboard Shortcuts Help */}
-          <div className="mt-8 pt-6 border-t border-gray-200">
-            <h4 className="text-sm font-medium text-gray-900 mb-2">Keyboard Shortcuts</h4>
-            <div className="text-xs text-gray-600 space-y-1">
-              <p><kbd className="px-2 py-1 bg-gray-100 rounded font-mono">1</kbd> or <kbd className="px-2 py-1 bg-gray-100 rounded font-mono">Enter</kbd> - Mark correct</p>
-              <p><kbd className="px-2 py-1 bg-gray-100 rounded font-mono">2</kbd> - Fix value</p>
-              <p><kbd className="px-2 py-1 bg-gray-100 rounded font-mono">3</kbd> - Not found</p>
-              <p><kbd className="px-2 py-1 bg-gray-100 rounded font-mono">S</kbd> - Skip</p>
-            </div>
-          </div>
         </div>
-      </div>
+        </div>
+      )}
     </div>
   );
 }
