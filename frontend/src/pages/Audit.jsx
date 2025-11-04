@@ -259,7 +259,7 @@ export default function Audit() {
 
           <button
             onClick={() => window.location.reload()}
-            className="mt-6 bg-blue-600 text-white px-6 py-2 rounded-lg font-medium hover:bg-blue-700 transition-colors"
+            className="mt-6 bg-periwinkle-600 text-white px-6 py-2 rounded-lg font-medium hover:bg-periwinkle-700 transition-colors"
           >
             Start New Session
           </button>
@@ -311,7 +311,7 @@ export default function Audit() {
           <>
             <div className="w-full bg-gray-200 rounded-full h-2">
               <div
-                className="bg-blue-600 h-2 rounded-full transition-all duration-300"
+                className="bg-periwinkle-600 h-2 rounded-full transition-all duration-300"
                 style={{ width: `${((currentIndex) / queue.length) * 100}%` }}
               />
             </div>
@@ -425,7 +425,7 @@ export default function Audit() {
                             setShowCorrectionInput(true);
                             setIsEditingComplexField(false);
                           }}
-                          className="px-3 py-1.5 text-sm bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors"
+                          className="px-3 py-1.5 text-sm bg-periwinkle-600 text-white rounded hover:bg-periwinkle-700 transition-colors"
                         >
                           Apply Changes
                         </button>
@@ -467,10 +467,10 @@ export default function Audit() {
                   <div
                     className={`h-2 rounded-full ${
                       currentItem.confidence < 0.4
-                        ? 'bg-red-500'
+                        ? 'bg-coral-500'
                         : currentItem.confidence < 0.6
                         ? 'bg-yellow-500'
-                        : 'bg-green-500'
+                        : 'bg-mint-500'
                     }`}
                     style={{ width: `${currentItem.confidence * 100}%` }}
                   />
@@ -502,7 +502,7 @@ export default function Audit() {
             <button
               onClick={handleCorrect}
               disabled={verifying}
-              className="w-full bg-green-600 text-white py-3 px-4 rounded-lg font-medium hover:bg-green-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              className="w-full bg-mint-600 text-white py-3 px-4 rounded-lg font-medium hover:bg-mint-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
               ✓ Correct
             </button>
@@ -521,12 +521,12 @@ export default function Audit() {
                   }}
                   placeholder="Enter correct value..."
                   autoFocus
-                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-periwinkle-500 focus:border-transparent"
                 />
                 <button
                   onClick={handleIncorrect}
                   disabled={verifying || !correctionValue.trim()}
-                  className="w-full bg-blue-600 text-white py-3 px-4 rounded-lg font-medium hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="w-full bg-periwinkle-600 text-white py-3 px-4 rounded-lg font-medium hover:bg-periwinkle-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   Submit Correction
                 </button>
@@ -535,7 +535,7 @@ export default function Audit() {
               <button
                 onClick={() => setShowCorrectionInput(true)}
                 disabled={verifying}
-                className="w-full bg-blue-600 text-white py-3 px-4 rounded-lg font-medium hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                className="w-full bg-periwinkle-600 text-white py-3 px-4 rounded-lg font-medium hover:bg-periwinkle-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 ✗ Fix Value
               </button>
@@ -545,7 +545,7 @@ export default function Audit() {
             <button
               onClick={handleNotFound}
               disabled={verifying}
-              className="w-full bg-yellow-600 text-white py-3 px-4 rounded-lg font-medium hover:bg-yellow-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              className="w-full bg-coral-600 text-white py-3 px-4 rounded-lg font-medium hover:bg-coral-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
               ⊘ Not Found
             </button>
