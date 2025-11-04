@@ -5,10 +5,8 @@ import BulkConfirmation from './pages/BulkConfirmation'
 import DocumentsDashboard from './pages/DocumentsDashboard'
 import NaturalLanguageQuery from './pages/NaturalLanguageQuery'
 import Audit from './pages/Audit'
-import Analytics from './pages/Analytics'
 import SchemaEditor from './pages/SchemaEditor'
 import Settings from './pages/Settings'
-import Export from './pages/Export'
 
 function App() {
   return (
@@ -20,8 +18,6 @@ function App() {
         <Route path="query" element={<NaturalLanguageQuery />} />
         <Route path="audit" element={<Audit />} />
         <Route path="audit/document/:documentId" element={<Audit />} />
-        <Route path="analytics" element={<Analytics />} />
-        <Route path="export" element={<Export />} />
         <Route path="settings" element={<Settings />} />
         <Route path="schema/:schemaId" element={<SchemaEditor />} />
         {/* Legacy routes - redirect to Audit */}

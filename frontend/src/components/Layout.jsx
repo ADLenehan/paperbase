@@ -18,8 +18,6 @@ function Layout() {
     { path: '/documents', label: 'Documents' },
     { path: '/audit', label: 'Audit', badge: auditQueueCount },
     { path: '/query', label: 'Ask AI' },
-    { path: '/export', label: 'Export' },
-    { path: '/analytics', label: 'Analytics' },
     { path: '/settings', label: 'Settings' },
   ]
 
