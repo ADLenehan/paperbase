@@ -1,6 +1,7 @@
 import anthropic
 from typing import Dict, Any, List, Optional
 from datetime import datetime
+import calendar
 from app.core.config import settings
 from app.core.exceptions import ClaudeError, SchemaError
 import json
@@ -23,16 +24,17 @@ class ClaudeService:
 
     def __init__(self):
         self.client = anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY)
-        self.model = "claude-3-5-sonnet-20241022"
+        self.model = "claude-sonnet-4-20250514"  # Claude Sonnet 4 (latest)
         logger.debug(f"ClaudeService initialized with model: {self.model}")
         logger.debug(f"Client type: {type(self.client)}, has messages: {hasattr(self.client, 'messages')}")
 
     async def analyze_sample_documents(
         self,
-        parsed_documents: List[Dict[str, Any]]
+        parsed_documents: List[Dict[str, Any]],
+        user_context: Optional[str] = None
     ) -> Dict[str, Any]:
         """
-        Analyze sample documents and generate extraction schema
+        Analyze sample documents and generate extraction schema with complexity assessment
 
         Args:
             parsed_documents: List of Reducto parsed documents
@@ -43,21 +45,41 @@ class ClaudeService:
                 "fields": [
                     {
                         "name": "effective_date",
-                        "type": "date",
+                        "type": "date|text|number|boolean|array|table|array_of_objects",
                         "required": true,
                         "extraction_hints": ["Effective Date:", "Dated:"],
                         "confidence_threshold": 0.75,
-                        "description": "Contract effective date"
+                        "description": "Contract effective date",
+                        # For arrays:
+                        "item_type": "text|number|date",  # optional
+                        # For tables:
+                        "table_schema": {  # optional
+                            "row_identifier": "pom_code",
+                            "columns": ["size_2", "size_3"],
+                            "dynamic_columns": true,
+                            "value_type": "number"
+                        },
+                        # For array_of_objects:
+                        "object_schema": {  # optional
+                            "description": {"type": "text", "required": true},
+                            "quantity": {"type": "number", "required": true}
+                        }
                     },
                     ...
-                ]
+                ],
+                "complexity_assessment": {  # NEW
+                    "score": 45,
+                    "confidence": 0.85,
+                    "warnings": ["List of warnings"],
+                    "recommendation": "auto|assisted|manual"
+                }
             }
         """
         if not parsed_documents:
             raise SchemaError("No documents provided for analysis")
 
-        # Build prompt with document samples
-        prompt = self._build_schema_generation_prompt(parsed_documents)
+        # Build prompt with document samples and optional user context
+        prompt = self._build_schema_generation_prompt(parsed_documents, user_context)
 
         logger.info(f"Requesting schema generation from Claude for {len(parsed_documents)} documents")
 
@@ -88,10 +110,19 @@ class ClaudeService:
             if "name" not in schema or "fields" not in schema:
                 raise SchemaError("Invalid schema format: missing 'name' or 'fields'")
 
+            # Extract complexity assessment (optional for backward compatibility)
+            complexity = schema.get("complexity_assessment", {
+                "score": 0,
+                "confidence": 0.0,
+                "warnings": [],
+                "recommendation": "auto"
+            })
+
             num_fields = len(schema.get("fields", []))
             logger.info(
                 f"Schema generated successfully: '{schema.get('name')}' "
-                f"with {num_fields} fields"
+                f"with {num_fields} fields, "
+                f"complexity: {complexity.get('score')} ({complexity.get('recommendation')})"
             )
 
             return schema
@@ -109,11 +140,134 @@ class ClaudeService:
             logger.error(f"Error generating schema with Claude: {e}", exc_info=True)
             raise ClaudeError(f"Unexpected error during schema generation: {str(e)}", e)
 
+    async def quick_analyze_document(
+        self,
+        parsed_document: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """
+        Quick document analysis to suggest context categories for schema generation.
+        Analyzes the actual document structure and suggests what data can be extracted.
+
+        Args:
+            parsed_document: Single Reducto parsed document
+
+        Returns:
+            {
+                "suggestions": [
+                    "Table with measurements (columns: Size, Chest, Waist, Hip)",
+                    "Repeated color/SKU information",
+                    "Fabric composition details"
+                ],
+                "document_structure": {
+                    "has_tables": true,
+                    "table_count": 2,
+                    "has_repeated_sections": true,
+                    "section_count": 5
+                }
+            }
+        """
+
+        # Extract document sample
+        chunks = parsed_document.get("result", {}).get("chunks", [])
+        # Reducto v2 has nested structure: chunk['blocks'][i]['content']
+        text_parts = []
+        for chunk in chunks[:15]:
+            # Try new format (blocks array)
+            if 'blocks' in chunk and isinstance(chunk['blocks'], list):
+                for block in chunk['blocks']:
+                    if 'content' in block and block['content']:
+                        text_parts.append(block['content'])
+            # Fallback to old format (direct content field)
+            elif chunk.get("content") or chunk.get("text"):
+                text_parts.append(chunk.get("content", chunk.get("text", "")))
+
+        text = "\n".join(text_parts)
+        text_sample = text[:3000]  # First 3000 chars
+
+        prompt = f"""Analyze this document and suggest what data can be extracted from it.
+
+Document Sample:
+{text_sample}
+
+Your task:
+1. Identify what types of information are present in this document
+2. Look for tables, lists, repeated structures, key-value pairs
+3. Suggest 3-5 specific data extraction opportunities
+
+Return ONLY a JSON object with this structure:
+{{
+    "suggestions": [
+        "Brief description of extractable data (e.g., 'Table with product measurements across multiple sizes')",
+        "Another data opportunity",
+        "..."
+    ],
+    "document_structure": {{
+        "has_tables": true|false,
+        "table_count": 0,
+        "has_repeated_sections": true|false,
+        "section_count": 0,
+        "has_key_value_pairs": true|false
+    }}
+}}
+
+Guidelines for suggestions:
+- Be specific about table structures (mention columns if visible)
+- Note repeated patterns (e.g., "Multiple product entries with SKU, color, size")
+- Identify complex structures (e.g., "Nested bill of materials with quantities")
+- Mention any domain-specific data (e.g., "Garment grading measurements", "Financial line items")
+- Keep suggestions actionable and clear
+
+Return ONLY the JSON, no markdown formatting."""
+
+        logger.info("Requesting quick document analysis from Claude")
+
+        try:
+            message = self.client.messages.create(
+                model=self.model,
+                max_tokens=1024,  # Smaller response for quick analysis
+                messages=[
+                    {
+                        "role": "user",
+                        "content": prompt
+                    }
+                ]
+            )
+
+            # Parse Claude's response
+            response_text = message.content[0].text
+
+            # Remove markdown code blocks if present
+            if response_text.startswith("```"):
+                response_text = response_text.split("```")[1]
+                if response_text.startswith("json"):
+                    response_text = response_text[4:]
+                response_text = response_text.rsplit("```", 1)[0]
+
+            analysis = json.loads(response_text.strip())
+
+            logger.info(f"Quick analysis complete: {len(analysis.get('suggestions', []))} suggestions")
+
+            return analysis
+
+        except json.JSONDecodeError as e:
+            logger.error(f"Failed to parse quick analysis response as JSON: {e}")
+            logger.debug(f"Response text: {response_text[:500]}")
+            raise ClaudeError("Claude did not return valid JSON for quick analysis", e)
+
+        except anthropic.APIError as e:
+            logger.error(f"Anthropic API error during quick analysis: {str(e)}")
+            raise ClaudeError(f"API error during quick analysis: {str(e)}", e)
+
+        except Exception as e:
+            logger.error(f"Error during quick analysis: {e}", exc_info=True)
+            raise ClaudeError(f"Unexpected error during quick analysis: {str(e)}", e)
+
     def _build_schema_generation_prompt(
         self,
-        parsed_documents: List[Dict[str, Any]]
+        parsed_documents: List[Dict[str, Any]],
+        user_context: Optional[str] = None
     ) -> str:
-        """Build prompt for schema generation"""
+        """Build prompt for schema generation with optional user context"""
 
         # Extract text samples from documents
         document_samples = []
@@ -125,17 +279,40 @@ class ClaudeService:
 
         samples_text = "\n\n".join(document_samples)
 
+        # Add user context section if provided
+        context_section = ""
+        if user_context:
+            context_section = f"""
+User Context (what the user wants to extract):
+{user_context}
+
+Use this context to guide your field extraction. Pay special attention to the data structures and information the user mentioned.
+
+"""
+
         prompt = f"""Analyze these sample documents and generate an extraction schema in JSON format.
 
 Documents:
 {samples_text}
 
-Your task:
+{context_section}Your task:
 1. Identify the common fields across all documents
-2. Determine the data type for each field (text, date, number, boolean, etc.)
+2. Determine the data type for each field (text, date, number, boolean, array, table, array_of_objects)
 3. Create extraction hints (keywords/phrases that appear near each field)
 4. Set appropriate confidence thresholds (0.0-1.0)
 5. Mark fields as required or optional
+6. Assess the overall complexity of this schema
+
+IMPORTANT - Reducto API Requirements (MANDATORY):
+- **Every field MUST have a description** (minimum 10 characters)
+- Descriptions act as prompts to guide extraction - be specific about what to extract
+- Field names MUST be descriptive and use snake_case (e.g., "invoice_date" not "field1")
+- Field names should match document terminology where possible (e.g., if doc says "PO Number", use "po_number")
+- extraction_hints should include ACTUAL text from documents (labels, headers, keywords)
+- Include multiple hint variations (e.g., ["Total:", "Total Amount:", "Grand Total:"])
+- **NO CALCULATIONS**: Extract raw values only, never prompt for derived values (e.g., don't say "multiply X by Y")
+- Use boolean type for yes/no fields (not text with "yes"/"no" values)
+- Consider using enum values for fields with limited options (status, category, type)
 
 Return ONLY a JSON object with this exact structure:
 {{
@@ -143,21 +320,56 @@ Return ONLY a JSON object with this exact structure:
     "fields": [
         {{
             "name": "field_name",
-            "type": "date|text|number|boolean",
+            "type": "text|date|number|boolean|array|table|array_of_objects",
             "required": true|false,
             "extraction_hints": ["keyword1", "keyword2"],
             "confidence_threshold": 0.75,
             "description": "Brief description"
         }}
-    ]
+    ],
+    "complexity_assessment": {{
+        "score": 45,
+        "confidence": 0.85,
+        "warnings": ["List any concerns about auto-extraction reliability"],
+        "recommendation": "auto|assisted|manual"
+    }}
 }}
 
-Important:
-- Use snake_case for field names
-- extraction_hints should be actual text snippets from the documents
-- Set confidence_threshold between 0.6-0.9 based on field importance
-- Include 5-15 fields (focus on the most important ones)
-- Return ONLY the JSON, no markdown formatting or explanation"""
+Field Type Guidelines:
+- **text**: Simple text values (names, addresses, descriptions)
+- **date**: Date values in any format
+- **number**: Numeric values (prices, quantities, percentages)
+- **boolean**: Yes/no, true/false values
+- **array**: List of simple values (e.g., ["Red", "Blue", "Green"])
+  - Add "item_type": "text|number|date" to specify array item type
+  - Example: {{"name": "colors", "type": "array", "item_type": "text"}}
+- **table**: Structured data with rows and columns
+  - Add "table_schema" with row_identifier and columns
+  - Example: {{"name": "measurements", "type": "table", "table_schema": {{"row_identifier": "pom_code", "columns": ["size_2", "size_3"], "value_type": "number"}}}}
+  - Use "dynamic_columns": true for variable columns
+- **array_of_objects**: List of structured items (e.g., invoice line items)
+  - Add "object_schema" defining the object structure
+  - Example: {{"name": "line_items", "type": "array_of_objects", "object_schema": {{"description": {{"type": "text"}}, "quantity": {{"type": "number"}}}}}}
+
+Complexity Assessment:
+Calculate a complexity score (0-100+) based on:
+- Field count × 3 (more fields = more complex)
+- Nesting depth × 15 (tables, arrays of objects)
+- Number of arrays × 10
+- Table complexity × 20 (rows × columns, dynamic columns)
+- Domain specificity × 10 (specialized terminology)
+- Data variability × 5 (inconsistent formats)
+
+Scoring Guidelines:
+- 0-50: **auto** - Simple documents, high confidence (0.8-0.95)
+  - Examples: Basic invoices (5-8 text/number fields), simple forms, receipts
+- 51-80: **assisted** - Medium complexity, moderate confidence (0.6-0.75)
+  - Examples: Contracts with tables, invoices with line items, multi-page forms
+- 81+: **manual** - High complexity, low confidence (0.3-0.5)
+  - Examples: Financial statements, technical specs with charts, garment grading tables
+  - Warnings: "Contains complex multi-cell tables", "Multiple nested structures", "Graphs/charts detected"
+
+Return ONLY the JSON, no markdown formatting or explanation."""
 
         return prompt
 
@@ -385,9 +597,24 @@ Return the complete modified fields array in JSON format."""
             }
 
         # Extract document text sample
-        chunks = parsed_document.get("result", {}).get("chunks", [])
-        # Reducto uses 'content' field for text, fallback to 'text'
-        doc_text = "\n".join([chunk.get("content", chunk.get("text", "")) for chunk in chunks[:10]])[:2000]
+        # NOTE: parsed_document IS the result dict (from document.reducto_parse_result)
+        chunks = parsed_document.get("chunks", [])
+        # Reducto v2 has nested structure: chunk['blocks'][i]['content']
+        doc_text_parts = []
+        for chunk in chunks[:10]:
+            # Try new format (blocks array)
+            if 'blocks' in chunk and isinstance(chunk['blocks'], list):
+                for block in chunk['blocks']:
+                    if 'content' in block and block['content']:
+                        doc_text_parts.append(block['content'])
+            # Fallback to old format (direct content field)
+            elif chunk.get("content") or chunk.get("text"):
+                doc_text_parts.append(chunk.get("content", chunk.get("text", "")))
+
+        doc_text = "\n".join(doc_text_parts)[:2000]
+
+        # DEBUG: Log what text we extracted
+        logger.debug(f"Extracted text for template matching - length: {len(doc_text)}, first 200 chars: {doc_text[:200]}")
 
         # Build template descriptions
         template_info = []
@@ -663,28 +890,93 @@ Examples:
         self,
         query: str,
         search_results: List[Dict[str, Any]],
-        total_count: int
-    ) -> str:
+        total_count: int,
+        include_confidence_metadata: bool = True
+    ) -> Dict[str, Any]:
         """
-        Generate natural language answer about search results
+        Generate natural language answer about search results with optional confidence metadata.
 
         Args:
             query: User's original query
             search_results: List of matching documents
             total_count: Total number of matches
+            include_confidence_metadata: If True, include confidence scores and structured output
 
         Returns:
-            Natural language answer
+            If include_confidence_metadata=True:
+                {
+                    "answer": "Natural language answer",
+                    "sources_used": [doc_id1, doc_id2, ...],
+                    "low_confidence_warnings": [{doc_id, field, confidence}, ...],
+                    "confidence_level": "high|medium|low"
+                }
+            If include_confidence_metadata=False:
+                {
+                    "answer": "Natural language answer"
+                }
         """
-        # Summarize results
+        # Build enhanced results with confidence metadata
         results_summary = []
-        for doc in search_results[:5]:  # First 5 results
-            results_summary.append({
-                "filename": doc.get("filename"),
-                "fields": {k: v for k, v in doc.items() if k != "filename"}
-            })
+        for doc in search_results[:10]:  # Increased from 5 to 10
+            doc_data = doc.get("data", {}) if "data" in doc else doc
 
-        prompt = f"""Answer this question based on the search results.
+            if include_confidence_metadata:
+                # Extract confidence scores if available
+                confidence_scores = doc_data.get("confidence_scores", {})
+
+                # Calculate average confidence
+                avg_conf = 0.0
+                if confidence_scores:
+                    avg_conf = sum(confidence_scores.values()) / len(confidence_scores)
+
+                results_summary.append({
+                    "document_id": doc.get("id"),
+                    "filename": doc_data.get("filename", "Unknown"),
+                    "fields": {k: v for k, v in doc_data.items()
+                              if k not in ["filename", "full_text", "confidence_scores", "document_id"]},
+                    "confidence_scores": confidence_scores,
+                    "avg_confidence": round(avg_conf, 2)
+                })
+            else:
+                # Legacy format (backward compatible)
+                results_summary.append({
+                    "filename": doc_data.get("filename"),
+                    "fields": {k: v for k, v in doc_data.items() if k != "filename"}
+                })
+
+        if include_confidence_metadata:
+            # Enhanced prompt with confidence awareness
+            prompt = f"""Answer this question based on the search results. Pay attention to data quality.
+
+User question: "{query}"
+
+Found {total_count} matching documents.
+
+Documents (with quality metadata):
+{json.dumps(results_summary, indent=2)}
+
+Instructions:
+1. Provide a clear, concise answer (2-4 sentences)
+2. Note which document IDs you used for factual claims
+3. If using data with low confidence (<0.7), mention uncertainty
+
+Return ONLY valid JSON with this structure:
+{{
+    "answer": "Your natural language answer here",
+    "sources_used": [document_ids_you_referenced],
+    "low_confidence_warnings": [
+        {{"document_id": 123, "field": "field_name", "confidence": 0.55}}
+    ],
+    "confidence_level": "high or medium or low"
+}}
+
+Set confidence_level based on:
+- high: All data >= 0.8 confidence
+- medium: Some data 0.6-0.8 confidence
+- low: Any data < 0.6 confidence"""
+        else:
+            # Legacy prompt (backward compatible)
+            prompt = f"""Answer this question based on the search results.
 
 User question: "{query}"
 
@@ -703,24 +995,68 @@ Keep it concise (2-3 sentences)."""
         try:
             message = self.client.messages.create(
                 model=self.model,
-                max_tokens=512,
+                max_tokens=1024,  # Increased for structured output
                 messages=[{"role": "user", "content": prompt}]
             )
 
-            answer = message.content[0].text.strip()
-            logger.info(f"Generated answer for query: {query}")
-            return answer
+            response_text = message.content[0].text.strip()
+
+            if include_confidence_metadata:
+                # Parse JSON response
+                # Remove markdown code blocks if present
+                if response_text.startswith("```"):
+                    response_text = response_text.split("```")[1]
+                    if response_text.startswith("json"):
+                        response_text = response_text[4:]
+                    response_text = response_text.strip()
+
+                try:
+                    structured_response = json.loads(response_text)
+
+                    # Validate structure
+                    if "answer" not in structured_response:
+                        # Fallback if JSON parsing failed
+                        logger.warning("Claude didn't return structured JSON, using fallback")
+                        return {
+                            "answer": response_text,
+                            "sources_used": [],
+                            "low_confidence_warnings": [],
+                            "confidence_level": "unknown"
+                        }
+
+                    logger.info(f"Generated structured answer for query: {query}")
+                    return structured_response
+
+                except json.JSONDecodeError as e:
+                    logger.warning(f"Failed to parse Claude JSON response: {e}")
+                    # Fallback to plain answer
+                    return {
+                        "answer": response_text,
+                        "sources_used": [],
+                        "low_confidence_warnings": [],
+                        "confidence_level": "unknown"
+                    }
+            else:
+                # Legacy mode - return plain text wrapped in dict
+                logger.info(f"Generated answer for query: {query}")
+                return {"answer": response_text}
 
         except Exception as e:
             logger.error(f"Error generating answer: {e}")
-            return f"Found {total_count} matching documents."
+            return {
+                "answer": f"Found {total_count} matching documents.",
+                "sources_used": [],
+                "low_confidence_warnings": [],
+                "confidence_level": "unknown"
+            }
 
     async def parse_natural_language_query(
         self,
         query: str,
         available_fields: List[str],
         field_metadata: Optional[Dict[str, Any]] = None,
-        conversation_history: List[Dict[str, str]] = None
+        conversation_history: List[Dict[str, str]] = None,
+        template_context: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
         """
         Parse natural language query with advanced date parsing, fuzzy matching,
@@ -731,6 +1067,8 @@ Keep it concise (2-3 sentences)."""
             available_fields: List of field names
             field_metadata: Rich field context from SchemaRegistry
             conversation_history: Previous conversation for context
+            template_context: Optional template-specific field information
+                {"name": "Template Name", "fields": [{name, type, description}, ...]}
 
         Returns:
             {
@@ -782,74 +1120,153 @@ Keep it concise (2-3 sentences)."""
                 for h in conversation_history[-2:]
             ])
 
-        # NEW: Build enriched field descriptions using metadata
+        # NEW: Build comprehensive semantic field mapping guide (ALWAYS-ON, not template-specific)
+        semantic_guide = self._build_semantic_field_mapping_guide(
+            available_fields=available_fields,
+            field_metadata=field_metadata,
+            template_context=template_context
+        )
+
+        # Build enriched field descriptions for additional reference
         field_descriptions = self._build_field_descriptions(available_fields, field_metadata)
 
-        prompt = f"""You are an expert at parsing natural language queries for document search.
+        # Extract template routing hints if available (helps decide field vs full_text)
+        template_routing = ""
+        if template_context:
+            template_name = template_context.get("name", "Unknown")
+
+            # Check if template has search guidance metadata
+            search_hints = template_context.get("search_hints", [])
+            not_extracted = template_context.get("not_extracted", [])
+
+            if search_hints or not_extracted:
+                template_routing = f"""
+
+📍 SEARCH ROUTING GUIDANCE for "{template_name}":
+"""
+                if search_hints:
+                    template_routing += f"""
+✅ EXTRACTED FIELDS cover: {', '.join(search_hints)}
+   → Use multi_match with field boosting (field^10, full_text^1)
+"""
+                if not_extracted:
+                    template_routing += f"""
+❌ NOT IN FIELDS (requires full_text search): {', '.join(not_extracted)}
+   → Use match on full_text or _all_text only
+"""
+                template_routing += f"""
+⚠️  Template filter is automatic - DO NOT add template_name to your query filters
+"""
+
+        prompt = f"""You are a SEMANTIC QUERY TRANSLATOR for document search.
+
+YOUR CRITICAL MISSION: Map user's natural language to PRECISE search fields.
+
+{semantic_guide}
+{template_routing}
+
 Current date: {today.strftime("%Y-%m-%d")}
 Date context: {json.dumps(date_context, indent=2)}
 
-Available fields with context:
+Additional field information:
 {field_descriptions}
 
 User query: "{query}"{history_context}
 
-Your task:
-1. Determine query type (search, aggregation, anomaly, comparison)
-2. Parse date references (last month, Q4 2024, this year, etc.) using date_context
-3. Extract filters (vendors, amounts, statuses, etc.)
-4. Handle fuzzy matching (e.g., "Acme" should match "Acme Corp", "ACME Inc")
-5. Detect if clarification is needed (ambiguous query)
-6. Build appropriate Elasticsearch query
+YOUR PROCESS:
+1. **Semantic Field Mapping** (HIGHEST PRIORITY):
+   - Extract key terms from user query
+   - Match terms to field names using the mapping guide above
+   - Generate multi_match query with field boosting
 
-Query types:
-- search: Find specific documents ("show me invoices from Acme")
-- aggregation: Calculate totals/averages ("total spending by vendor", "average invoice amount")
-- anomaly: Find unusual patterns ("duplicate invoices", "unusually high amounts")
-- comparison: Compare time periods ("last month vs this month")
+2. **Query Type Detection**:
+   - search: Find specific documents
+   - aggregation: Calculate totals/averages/counts
+   - anomaly: Find unusual patterns (duplicates, outliers)
+   - comparison: Compare time periods
 
-Return ONLY JSON:
+3. **Filter Extraction**:
+   - Date ranges (use date_context above for "last month", "Q4 2024", etc.)
+   - Numeric ranges (amounts, counts)
+   - Text filters (vendors, statuses)
+   - Use fuzzy matching for text (e.g., "Acme" matches "Acme Corp", "ACME Inc")
+
+4. **Clarification Detection**:
+   - If query is ambiguous, set needs_clarification=true
+   - Ask a specific question to clarify user intent
+
+Return ONLY JSON (no markdown, no explanation outside JSON):
 {{
     "query_type": "search|aggregation|anomaly|comparison",
     "needs_clarification": false,
     "clarifying_question": null,
     "elasticsearch_query": {{
         "query": {{
-            "bool": {{
-                "must": [...],
-                "filter": [...],
-                "should": [...]
+            "multi_match": {{
+                "query": "search terms",
+                "fields": ["specific_field^10", "related_field^5", "full_text^1"],
+                "type": "best_fields"
             }}
         }}
     }},
-    "explanation": "Human-readable explanation of what we're searching for",
+    "explanation": "Human-readable explanation",
     "aggregation": {{"type": "sum|avg|count|group_by", "field": "field_name", "value_field": "optional"}},
     "filters": {{"field": "value"}},
     "date_range": {{"from": "YYYY-MM-DD", "to": "YYYY-MM-DD"}}
 }}
 
-Important:
-- Use "match" queries for fuzzy text matching (e.g., vendor names)
-- Use "range" queries for dates and numbers
-- Use "term" queries for exact matches (status, etc.)
-- For aggregations, still include the base search query
-- If the query is ambiguous, set needs_clarification=true and ask a specific question
-- Handle "last quarter" by calculating previous complete quarter
-- Handle "YTD" as year-to-date from Jan 1 to today
-- Handle relative dates like "in 30 days" from today forward
+QUERY CONSTRUCTION RULES:
+- ✅ ALWAYS use multi_match with field boosting for search queries
+- ✅ Map query terms to fields using the semantic guide above
+- ✅ Use "range" queries for dates and numbers in filter clauses
+- ✅ Use "term" queries for exact matches (status, IDs) in filter clauses
+- ✅ Use fuzzy "match" queries for text (vendor names, descriptions)
+- ❌ NEVER create {{"match": {{"full_text": "..."}}}} queries (too broad)
+- ❌ NEVER add template_name filters (system handles this automatically)
 
-Examples:
-1. "invoices from Acme over $5000 last quarter"
-   → filter vendor (fuzzy match "Acme"), range amount > 5000, date range for Q{current_quarter-1}
+CONCRETE EXAMPLES:
 
-2. "total spending by vendor this year"
-   → aggregation: group_by vendor, sum amount, date range YTD
+Example 1: Field-Specific Search
+Query: "what cloud platform is used?"
+Analysis: "cloud" + "platform" → matches field "cloud_platform"
+Generated Query:
+{{
+  "multi_match": {{
+    "query": "cloud platform",
+    "fields": ["cloud_platform^10", "full_text^1"],
+    "type": "best_fields"
+  }}
+}}
 
-3. "find duplicate invoices"
-   → anomaly query: group by vendor+amount+date, find count > 1
+Example 2: Cross-Field Range Query
+Query: "invoices over $5000 last quarter"
+Analysis: "invoices" + "$5000" → amount field range + date filter
+Generated Query:
+{{
+  "bool": {{
+    "must": [
+      {{"multi_match": {{"query": "invoices", "fields": ["full_text"]}}}}
+    ],
+    "filter": [
+      {{"range": {{"invoice_total": {{"gte": 5000}}}}}},
+      {{"range": {{"date": {{"gte": "{date_context['last_quarter']['start']}", "lte": "{date_context['last_quarter']['end']}"}}}}}}
+    ]
+  }}
+}}
 
-4. "contracts expiring in 30 days"
-   → filter date range from today to today+30 days"""
+Example 3: Aggregation Query
+Query: "total spending by vendor this year"
+Generated Query:
+{{
+  "bool": {{
+    "filter": [
+      {{"range": {{"date": {{"gte": "{current_year}-01-01"}}}}}}
+    ]
+  }}
+}}
+Aggregation: {{"type": "sum", "field": "invoice_total", "group_by": "vendor_name"}}
+
+Now parse the user query above and return ONLY the JSON response."""
 
         try:
             message = self.client.messages.create(
@@ -904,6 +1321,197 @@ Examples:
             "quarter": last_quarter,
             "year": year
         }
+
+    def _build_semantic_field_mapping_guide(
+        self,
+        available_fields: List[str],
+        field_metadata: Optional[Dict[str, Any]],
+        template_context: Optional[Dict[str, Any]] = None
+    ) -> str:
+        """
+        Build comprehensive semantic field mapping guide for Claude.
+        This is the CORE of the field mapping solution - teaches Claude how to map
+        query terms to actual field names.
+
+        Args:
+            available_fields: List of field names
+            field_metadata: Rich field context from SchemaRegistry
+            template_context: Optional template-specific context
+
+        Returns:
+            Formatted guide string with examples and rules
+        """
+        guide_parts = []
+
+        # Header
+        guide_parts.append("=" * 80)
+        guide_parts.append("🎯 SEMANTIC FIELD MAPPING GUIDE (CRITICAL)")
+        guide_parts.append("=" * 80)
+        guide_parts.append("")
+
+        # Build canonical field mappings table
+        canonical_patterns = {
+            "amount": ["total", "amount", "cost", "price", "value", "payment", "fee", "charge"],
+            "date": ["date", "created", "when", "time"],
+            "start_date": ["start", "effective", "begin", "commence", "from"],
+            "end_date": ["end", "expir", "terminat", "until", "to"],
+            "entity_name": ["vendor", "supplier", "customer", "client", "company", "organization"],
+            "identifier": ["number", "id", "reference", "ref", "code"],
+            "status": ["status", "state", "condition", "stage"],
+        }
+
+        # Group available fields by canonical category
+        canonical_mapping = {}
+        field_examples = {}
+
+        for field_name in available_fields:
+            field_lower = field_name.lower()
+            matched = False
+
+            # Try to match to canonical categories
+            for canonical, patterns in canonical_patterns.items():
+                if any(p in field_lower for p in patterns):
+                    if canonical not in canonical_mapping:
+                        canonical_mapping[canonical] = []
+                        field_examples[canonical] = []
+
+                    canonical_mapping[canonical].append(field_name)
+
+                    # Extract example terms from field name for mapping
+                    terms = field_name.replace("_", " ").lower().split()
+                    field_examples[canonical].extend(terms)
+                    matched = True
+                    break
+
+        # Section 1: Canonical Field Mappings
+        if canonical_mapping:
+            guide_parts.append("📋 CANONICAL FIELD MAPPINGS (Use these for cross-template queries):")
+            guide_parts.append("")
+
+            for canonical, fields in canonical_mapping.items():
+                if len(fields) >= 1:
+                    examples = list(set(field_examples.get(canonical, [])))[:5]
+                    guide_parts.append(f"  {canonical}:")
+                    guide_parts.append(f"    → Actual fields: {', '.join(fields)}")
+                    guide_parts.append(f"    → Query terms: {', '.join(examples)}")
+                    guide_parts.append("")
+
+            guide_parts.append("")
+
+        # Section 2: Field-Specific Mappings (if template provided)
+        if template_context:
+            template_name = template_context.get("name", "Unknown")
+            template_fields = template_context.get("fields", [])
+
+            guide_parts.append(f"🎯 TEMPLATE-SPECIFIC MAPPINGS (Template: '{template_name}'):")
+            guide_parts.append("")
+
+            for field in template_fields[:10]:  # Top 10 fields
+                field_name = field.get("name", "")
+                field_type = field.get("type", "text")
+                field_desc = field.get("description", "")
+
+                # Extract semantic terms from field name
+                terms = field_name.replace("_", " ").lower().split()
+                query_terms = ", ".join(terms)
+
+                guide_parts.append(f"  Field: {field_name} ({field_type})")
+                if field_desc:
+                    guide_parts.append(f"    Description: {field_desc}")
+                guide_parts.append(f"    Query terms that should map to this field: {query_terms}")
+                guide_parts.append("")
+
+        # Section 3: Concrete Examples
+        guide_parts.append("=" * 80)
+        guide_parts.append("📚 CONCRETE MAPPING EXAMPLES")
+        guide_parts.append("=" * 80)
+        guide_parts.append("")
+
+        # Generate examples based on actual available fields
+        example_counter = 1
+
+        # Example 1: Field-specific search
+        if canonical_mapping:
+            for canonical, fields in list(canonical_mapping.items())[:1]:  # First canonical type
+                field = fields[0]
+                field_terms = field.replace("_", " ")
+
+                guide_parts.append(f"Example {example_counter}: Field-Specific Search")
+                guide_parts.append(f"  User Query: \"what is the {field_terms}?\"")
+                guide_parts.append(f"  Analysis:")
+                guide_parts.append(f"    - Key terms: {', '.join(field_terms.split())}")
+                guide_parts.append(f"    - Matching field: '{field}' (contains matching terms)")
+                guide_parts.append(f"    - Strategy: Search specific field with high boost")
+                guide_parts.append(f"  ")
+                guide_parts.append(f"  Generated Query:")
+                guide_parts.append(f"  {{")
+                guide_parts.append(f"    \"multi_match\": {{")
+                guide_parts.append(f"      \"query\": \"{field_terms}\",")
+                guide_parts.append(f"      \"fields\": [\"{field}^10\", \"full_text^1\"],")
+                guide_parts.append(f"      \"type\": \"best_fields\"")
+                guide_parts.append(f"    }}")
+                guide_parts.append(f"  }}")
+                guide_parts.append("")
+                example_counter += 1
+
+        # Example 2: Cross-template canonical search
+        if len(canonical_mapping.get("amount", [])) > 1:
+            amount_fields = canonical_mapping["amount"]
+            guide_parts.append(f"Example {example_counter}: Cross-Template Canonical Search")
+            guide_parts.append(f"  User Query: \"show me amounts over $1000\"")
+            guide_parts.append(f"  Analysis:")
+            guide_parts.append(f"    - Key term: 'amount' (canonical category)")
+            guide_parts.append(f"    - Mapped to fields: {', '.join(amount_fields)}")
+            guide_parts.append(f"    - Strategy: Search ALL amount fields across templates")
+            guide_parts.append(f"  ")
+            guide_parts.append(f"  Generated Query:")
+            guide_parts.append(f"  {{")
+            guide_parts.append(f"    \"bool\": {{")
+            guide_parts.append(f"      \"should\": [")
+            for field in amount_fields:
+                guide_parts.append(f"        {{\"range\": {{\"{field}\": {{\"gte\": 1000}}}}}},")
+            guide_parts.append(f"      ],")
+            guide_parts.append(f"      \"minimum_should_match\": 1")
+            guide_parts.append(f"    }}")
+            guide_parts.append(f"  }}")
+            guide_parts.append("")
+            example_counter += 1
+
+        # Section 4: Mandatory Rules
+        guide_parts.append("=" * 80)
+        guide_parts.append("⚠️  MANDATORY QUERY CONSTRUCTION RULES")
+        guide_parts.append("=" * 80)
+        guide_parts.append("")
+
+        guide_parts.append("Rule 1: ALWAYS USE MULTI_MATCH WITH FIELD BOOSTING")
+        guide_parts.append("  ✅ CORRECT:")
+        guide_parts.append("  {\"multi_match\": {\"query\": \"...\", \"fields\": [\"specific_field^10\", \"full_text^1\"]}}")
+        guide_parts.append("")
+        guide_parts.append("  ❌ WRONG:")
+        guide_parts.append("  {\"match\": {\"full_text\": \"...\"}}  // Too broad, searches 10,000+ words")
+        guide_parts.append("")
+
+        guide_parts.append("Rule 2: MAP QUERY TERMS TO FIELD NAMES")
+        guide_parts.append("  Process:")
+        guide_parts.append("    1. Extract key terms from user query")
+        guide_parts.append("    2. Match terms to field names (exact or partial)")
+        guide_parts.append("    3. Boost matched fields 10x, related fields 5x, full_text 1x")
+        guide_parts.append("")
+
+        guide_parts.append("Rule 3: NEVER CREATE FULL_TEXT-ONLY QUERIES")
+        guide_parts.append("  If a specific field exists for the query intent, SEARCH THAT FIELD FIRST")
+        guide_parts.append("  Use full_text only as fallback, not primary search target")
+        guide_parts.append("")
+
+        guide_parts.append("Rule 4: FOR CANONICAL QUERIES (no template filter)")
+        guide_parts.append("  Search ALL fields matching the canonical category")
+        guide_parts.append("  Use bool→should with minimum_should_match: 1")
+        guide_parts.append("")
+
+        guide_parts.append("=" * 80)
+        guide_parts.append("")
+
+        return "\n".join(guide_parts)
 
     def _build_field_descriptions(
         self,
@@ -1062,3 +1670,157 @@ Keep it professional but conversational."""
                 elif aggregations.get("type") == "avg":
                     return f"Found {total_count} documents with an average of {aggregations.get('average', 0):.2f} for {aggregations.get('field')}."
             return f"Found {total_count} matching documents."
+
+    async def assess_document_complexity(
+        self,
+        parsed_documents: List[Dict[str, Any]]
+    ) -> Dict[str, Any]:
+        """
+        Assess document complexity before attempting auto-generation.
+
+        Returns:
+            {
+                "complexity_score": int (0-100+),
+                "recommendation": "auto" | "assisted" | "manual",
+                "confidence": float (0.0-1.0),
+                "warnings": List[str],
+                "detected_features": {
+                    "field_count_estimate": int,
+                    "has_tables": bool,
+                    "has_arrays": bool,
+                    "nesting_depth": int,
+                    "domain": str
+                }
+            }
+        """
+        if not parsed_documents:
+            return {
+                "complexity_score": 0,
+                "recommendation": "manual",
+                "confidence": 0.0,
+                "warnings": ["No documents provided"],
+                "detected_features": {}
+            }
+
+        # Analyze first document to estimate complexity
+        doc = parsed_documents[0]
+        chunks = doc.get("result", {}).get("chunks", [])
+        text_sample = "\n".join([c.get("content", c.get("text", "")) for c in chunks[:20]])
+
+        # Extract features
+        features = self._extract_complexity_features(text_sample)
+
+        # Calculate complexity score
+        score = (
+            (features["field_count"] * 3) +
+            (features["nesting_depth"] * 15) +
+            (features["array_count"] * 10) +
+            (features["table_complexity"] * 20) +
+            (features["domain_specificity"] * 10) +
+            (features["variability"] * 5)
+        )
+
+        # Determine recommendation
+        if score <= 50:
+            recommendation = "auto"
+            confidence = 0.85
+        elif score <= 80:
+            recommendation = "assisted"
+            confidence = 0.65
+        else:
+            recommendation = "manual"
+            confidence = 0.35
+
+        # Generate warnings
+        warnings = []
+        if features["field_count"] > 15:
+            warnings.append(f"High field count ({features['field_count']}) may exceed auto-generation capabilities (recommended: 5-15)")
+        if features["nesting_depth"] > 2:
+            warnings.append("Deep nesting detected - manual schema recommended")
+        if features["table_complexity"] > 1:
+            warnings.append("Complex table structure detected - may require manual column definitions")
+        if features["domain_specificity"] > 1:
+            warnings.append(f"Specialized domain terminology detected ({features.get('detected_domain', 'unknown')})")
+
+        logger.info(
+            f"Complexity assessment: score={score}, recommendation={recommendation}, "
+            f"fields={features['field_count']}, tables={features['has_tables']}"
+        )
+
+        return {
+            "complexity_score": score,
+            "recommendation": recommendation,
+            "confidence": confidence,
+            "warnings": warnings,
+            "detected_features": features
+        }
+
+    def _extract_complexity_features(self, text: str) -> Dict[str, Any]:
+        """
+        Extract complexity indicators from document text.
+        """
+        import re
+
+        # Count potential field labels (Pattern: "Label: Value")
+        label_pattern = r'([A-Z][a-zA-Z\s]{2,30}):\s*[^\n]+'
+        field_labels = re.findall(label_pattern, text)
+        field_count = len(set(field_labels))
+
+        # Detect tables (multiple rows with consistent column structure)
+        has_table = bool(re.search(r'(\|.*\|.*\|)|(<table>)', text, re.IGNORECASE))
+        table_rows = len(re.findall(r'\|.*\|.*\|', text))
+        table_complexity = 0
+        if has_table and table_rows > 10:
+            table_complexity = 2  # Large table
+        elif has_table:
+            table_complexity = 1  # Small table
+
+        # Detect arrays (repeating patterns)
+        has_arrays = bool(re.search(r'(Item \d+|Line \d+|\d+\.|#\d+)', text))
+        array_count = len(re.findall(r'(Item \d+|Line \d+)', text))
+        array_count = min(array_count // 3, 5)  # Normalize
+
+        # Estimate nesting (arrays with sub-fields)
+        nesting_depth = 0
+        if has_arrays:
+            nesting_depth = 1
+            # Check if array items have sub-structure
+            if re.search(r'(Item \d+.*Description:.*Price:)', text, re.DOTALL):
+                nesting_depth = 2
+
+        # Detect domain specificity
+        domain_keywords = {
+            "medical": ["diagnosis", "prescription", "patient", "dosage", "lab result"],
+            "legal": ["whereas", "party a", "party b", "covenant", "jurisdiction"],
+            "financial": ["invoice", "payment", "total", "tax", "subtotal"],
+            "scientific": ["hypothesis", "methodology", "coefficient", "specimen"],
+            "engineering": ["specification", "tolerance", "dimension", "material"]
+        }
+
+        domain_specificity = 0
+        detected_domain = "general"
+        text_lower = text.lower()
+        for domain, keywords in domain_keywords.items():
+            if sum(1 for kw in keywords if kw in text_lower) >= 2:
+                if domain in ["medical", "scientific", "engineering"]:
+                    domain_specificity = 3  # Highly specialized
+                    detected_domain = domain
+                elif domain == "legal":
+                    domain_specificity = 2  # Moderately specialized
+                    detected_domain = domain
+                else:
+                    domain_specificity = 0  # General business
+                    detected_domain = domain
+                break
+
+        return {
+            "field_count": field_count,
+            "has_tables": has_table,
+            "table_complexity": table_complexity,
+            "has_arrays": has_arrays,
+            "array_count": array_count,
+            "nesting_depth": nesting_depth,
+            "domain_specificity": domain_specificity,
+            "detected_domain": detected_domain,
+            "variability": 0  # Can only assess with multiple docs
+        }
