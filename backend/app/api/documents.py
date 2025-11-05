@@ -100,6 +100,7 @@ async def process_documents(
 async def process_single_document(document_id: int):
     """Background task to process a single document"""
     from app.core.database import SessionLocal
+    from app.services.citation_service import CitationService
 
     db = SessionLocal()
     try:
@@ -111,6 +112,7 @@ async def process_single_document(document_id: int):
 
         reducto_service = ReductoService()
         elastic_service = ElasticsearchService()
+        citation_service = CitationService()
 
         logger.info(f"Processing document {document_id}: {document.filename}")
 
@@ -224,6 +226,36 @@ async def process_single_document(document_id: int):
                     # Create ExtractedField record
                     needs_verification = confidence < settings.CONFIDENCE_THRESHOLD_LOW
 
+                    # NEW: Find source text and context for citations (MCP-friendly)
+                    source_text = None
+                    context_before = None
+                    context_after = None
+                    source_block_ids = []
+
+                    # Try to get parse result for source text extraction
+                    if document.reducto_parse_result:
+                        try:
+                            # Find source block in parse result
+                            source_block = citation_service.find_source_block_for_extraction(
+                                field_name=field_name,
+                                field_value=str(value),
+                                parse_result=document.reducto_parse_result,
+                                bbox=source_bbox,
+                                page=source_page
+                            )
+
+                            if source_block:
+                                # Extract source text and context
+                                all_blocks = document.reducto_parse_result.get("chunks", [])
+                                source_text, context_before, context_after = citation_service.extract_source_text_and_context(
+                                    block=source_block,
+                                    all_blocks=all_blocks
+                                )
+                                source_block_ids = [source_block.get("id")]
+                                logger.debug(f"Found source text for {field_name}: {source_text[:50]}...")
+                        except Exception as e:
+                            logger.warning(f"Could not extract source text for {field_name}: {e}")
+
                     extracted_field = ExtractedField(
                         document_id=document.id,
                         field_name=field_name,
@@ -231,7 +263,13 @@ async def process_single_document(document_id: int):
                         confidence_score=confidence,
                         needs_verification=needs_verification,
                         source_page=source_page,
-                        source_bbox=source_bbox
+                        source_bbox=source_bbox,
+                        # NEW: Citation fields for MCP
+                        source_text=source_text,
+                        context_before=context_before,
+                        context_after=context_after,
+                        source_block_ids=source_block_ids,
+                        extraction_method="reducto_structured"
                     )
                     db.add(extracted_field)
 

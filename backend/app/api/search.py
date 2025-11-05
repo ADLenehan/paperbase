@@ -17,6 +17,8 @@ class SearchRequest(BaseModel):
     query: str
     folder_path: Optional[str] = None
     conversation_history: Optional[List[Dict[str, str]]] = None
+    include_citations: bool = True  # NEW: Default ON for MCP compatibility
+    citation_format: str = "long"  # NEW: short|long|academic
 
 
 @router.post("")
@@ -45,9 +47,12 @@ async def search_documents(
     import hashlib
     from datetime import datetime
 
+    from app.services.citation_service import CitationService
+
     claude_service = ClaudeService()
     elastic_service = ElasticsearchService()
     schema_registry = SchemaRegistry(db)
+    citation_service = CitationService()
 
     # Initialize QueryOptimizer with SchemaRegistry for dynamic field resolution
     query_optimizer = QueryOptimizer(schema_registry=schema_registry)
@@ -83,23 +88,40 @@ async def search_documents(
                 size=20
             )
 
+            # NEW: Enrich with citations if requested (MCP-friendly)
+            results = search_results.get("documents", [])
+            if request.include_citations:
+                results = await citation_service.enrich_search_results_with_citations(
+                    results=results,
+                    db=db,
+                    citation_format=request.citation_format
+                )
+
             # Generate fresh answer
             answer = await claude_service.answer_question_about_results(
                 query=request.query,
-                search_results=search_results.get("documents", []),
+                search_results=results,
                 total_count=search_results.get("total", 0)
             )
+
+            # Build MCP context for AI agents
+            mcp_context = {
+                "citation_format": f"Cite sources using format: {request.citation_format}",
+                "all_fields_have_citations": request.include_citations,
+                "instructions": "When referencing data, always cite the source using the provided citation strings."
+            }
 
             return {
                 "query": request.query,
                 "answer": answer,
                 "explanation": cached_result.explanation,
-                "results": search_results.get("documents", []),
+                "results": results,
                 "total": search_results.get("total", 0),
                 "elasticsearch_query": {"query": es_query},
                 "cached": True,
                 "optimization_used": False,
-                "folder_path": request.folder_path
+                "folder_path": request.folder_path,
+                "mcp_context": mcp_context if request.include_citations else None
             }
 
         # Cache miss - proceed with optimization
@@ -200,6 +222,15 @@ async def search_documents(
             total_count=search_results.get("total", 0)
         )
 
+        # NEW: Enrich with citations if requested (MCP-friendly)
+        results = search_results.get("documents", [])
+        if request.include_citations:
+            results = await citation_service.enrich_search_results_with_citations(
+                results=results,
+                db=db,
+                citation_format=request.citation_format
+            )
+
         # Cache the successful query (without folder-specific results)
         try:
             cache_entry = QueryCache(
@@ -219,17 +250,26 @@ async def search_documents(
         except Exception as cache_error:
             logger.warning(f"Failed to cache query: {cache_error}")
 
+        # Build MCP context for AI agents
+        mcp_context = {
+            "citation_format": f"Cite sources using format: {request.citation_format}",
+            "all_fields_have_citations": request.include_citations,
+            "instructions": "When referencing data, always cite the source using the provided citation strings.",
+            "confidence_summary": f"{len([r for r in results if r.get('citations', {}).get('confidence', 0) > 0.8])} high-confidence results"
+        }
+
         return {
             "query": request.query,
             "answer": answer,
             "explanation": explanation,
-            "results": search_results.get("documents", []),
+            "results": results,
             "total": search_results.get("total", 0),
             "elasticsearch_query": {"query": es_query},
             "cached": False,
             "optimization_used": not use_claude,
             "query_confidence": query_analysis["confidence"],
-            "folder_path": request.folder_path
+            "folder_path": request.folder_path,
+            "mcp_context": mcp_context if request.include_citations else None
         }
 
     except Exception as e:

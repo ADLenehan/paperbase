@@ -55,6 +55,13 @@ class ExtractedField(Base):
     source_page = Column(Integer, nullable=True)
     source_bbox = Column(JSON, nullable=True)  # Bounding box coordinates
 
+    # NEW: Citation and provenance tracking for MCP
+    source_text = Column(Text, nullable=True)  # Actual text extracted from PDF
+    source_block_ids = Column(JSON, nullable=True)  # Array of block IDs from parse result
+    context_before = Column(Text, nullable=True)  # Text appearing before extraction (200 chars)
+    context_after = Column(Text, nullable=True)  # Text appearing after extraction (200 chars)
+    extraction_method = Column(String, nullable=True)  # 'reducto_structured', 'reducto_parse', 'claude', 'manual'
+
     # Timestamps
     extracted_at = Column(DateTime, default=datetime.utcnow)
     verified_at = Column(DateTime, nullable=True)
@@ -63,3 +70,49 @@ class ExtractedField(Base):
     document = relationship("Document", back_populates="extracted_fields")  # Legacy
     extraction = relationship("Extraction", back_populates="extracted_fields")  # New
     verifications = relationship("Verification", back_populates="extracted_field", cascade="all, delete-orphan")
+
+
+class DocumentBlock(Base):
+    """
+    Structured storage of Reducto parse result blocks for citation and retrieval.
+
+    Each block represents a chunk from the Reducto parse API with full context.
+    Used for:
+    - Linking extractions to source text
+    - Vector search (future)
+    - Citation generation for MCP
+    - RAG retrieval (future)
+    """
+    __tablename__ = "document_blocks"
+
+    id = Column(Integer, primary_key=True, index=True)
+    document_id = Column(Integer, ForeignKey("documents.id"), nullable=False)
+
+    # Block identification
+    block_id = Column(String, nullable=True)  # ID from Reducto parse result
+    block_type = Column(String, nullable=True)  # 'text', 'table', 'image', 'title', 'list'
+    block_index = Column(Integer, nullable=False)  # Order in document (0-indexed)
+
+    # Content
+    text_content = Column(Text, nullable=True)  # Main text content
+    confidence = Column(Float, nullable=True)  # Reducto's logprobs_confidence
+
+    # Location
+    page = Column(Integer, nullable=False)
+    bbox = Column(JSON, nullable=True)  # {x, y, width, height}
+
+    # Context for citation (helps LLMs understand surrounding text)
+    context_before = Column(Text, nullable=True)  # Previous 200 chars
+    context_after = Column(Text, nullable=True)  # Next 200 chars
+
+    # Metadata
+    parse_metadata = Column(JSON, nullable=True)  # Full block metadata from Reducto
+
+    # Future: Vector embedding for semantic search
+    # embedding = Column(Vector(1536), nullable=True)  # Requires pgvector extension
+
+    # Timestamps
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    # Relationships
+    document = relationship("Document", backref="blocks")
