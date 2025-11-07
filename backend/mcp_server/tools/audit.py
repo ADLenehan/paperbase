@@ -8,6 +8,7 @@ from typing import Optional, Dict, Any, List
 import logging
 
 from mcp_server.services.db_service import db_service
+from mcp_server.config import config
 
 logger = logging.getLogger(__name__)
 
@@ -65,12 +66,33 @@ async def get_audit_queue(
         else:
             filtered_queue = queue
 
+        # Build summary message
+        summary = f"Found {len(filtered_queue)} fields needing review"
+        if confidence_threshold:
+            summary += f" (confidence < {confidence_threshold:.1%})"
+
+        # Build audit URL with filters
+        audit_url = f"{config.FRONTEND_URL}/audit"
+        if template_id:
+            audit_url += f"?template={template_id}"
+
         return {
+            "summary": summary,
             "queue": filtered_queue,
             "total": len(filtered_queue),
             "threshold": confidence_threshold or 0.6,
             "template_filter": template_id,
-            "limit": limit
+            "limit": limit,
+            "web_ui_access": {
+                "audit_dashboard": audit_url,
+                "instructions": "Open this URL in your browser to review all fields"
+            },
+            "suggested_next_steps": [
+                f"Open the audit UI: {audit_url}",
+                "Click on low-confidence fields to verify",
+                "Use the inline audit modal for quick verification",
+                "Review fields with confidence below threshold first"
+            ]
         }
 
     except Exception as e:
@@ -166,13 +188,26 @@ async def get_audit_stats() -> Dict[str, Any]:
         # Get current audit queue size
         queue = await db_service.get_audit_queue(limit=1000)
 
+        pending_count = len(queue)
+        summary = f"{pending_count} fields pending review"
+
         return {
-            "pending_review": len(queue),
+            "summary": summary,
+            "pending_review": pending_count,
             "total_fields": stats.get("total_fields", 0),
             "verified_fields": stats.get("verified_fields", 0),
             "verification_rate": stats.get("verification_rate", 0.0),
             "avg_confidence": stats.get("avg_confidence", 0.0),
-            "period_days": 7
+            "period_days": 7,
+            "web_ui_access": {
+                "audit_dashboard": f"{config.FRONTEND_URL}/audit",
+                "instructions": f"Review {pending_count} pending fields in the audit UI"
+            },
+            "suggested_next_steps": [
+                f"Open {config.FRONTEND_URL}/audit to review pending fields",
+                "Focus on fields with confidence < 0.6 first",
+                "Use batch verification for efficiency"
+            ] if pending_count > 0 else []
         }
 
     except Exception as e:

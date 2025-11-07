@@ -106,8 +106,11 @@ export default function ChatSearch() {
         audit_items_filtered_count: data.audit_items_filtered_count,
         audit_items_total_count: data.audit_items_total_count,
         confidence_summary: data.confidence_summary,
-        // Field lineage tracking (NEW)
-        field_lineage: data.field_lineage
+        // Field lineage tracking
+        field_lineage: data.field_lineage,
+        // NEW: Query history tracking
+        query_id: data.query_id,
+        documents_link: data.documents_link
       }]);
 
     } catch (err) {
@@ -470,6 +473,8 @@ function Message({ message, messageIndex, onViewExtraction, onFieldVerified, onB
             auditItemsTotalCount={message.audit_items_total_count}
             confidenceSummary={message.confidence_summary}
             fieldLineage={message.field_lineage}
+            queryId={message.query_id}
+            documentsLink={message.documents_link}
             onFieldVerified={(fieldId, action, correctedValue, notes) =>
               onFieldVerified(messageIndex, fieldId, action, correctedValue, notes)
             }

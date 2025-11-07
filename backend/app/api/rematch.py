@@ -27,14 +27,14 @@ async def rematch_all_documents(
     """
 
     # Find all documents that need template matching
+    # Note: We don't filter by parse result here because it might be in PhysicalFile
+    # The hybrid_match_document function will skip docs without parse results
     unmatched_docs = db.query(Document).filter(
         or_(
             Document.status == "template_needed",
             Document.status == "analyzing",
             Document.suggested_template_id == None
         )
-    ).filter(
-        Document.reducto_parse_result != None  # Must have been parsed
     ).all()
 
     if not unmatched_docs:

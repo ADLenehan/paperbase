@@ -181,12 +181,12 @@ class ReductoService:
 
             # Build extract parameters for Reducto SDK v0.11.0
             # Required: document_url, schema
-            # Optional: system_prompt, array_extract, generate_citations, etc.
+            # Optional: system_prompt, array_extract
+            # Note: Citations are enabled by default in recent SDK versions
             extract_kwargs = {
                 "document_url": document_url,
                 "schema": reducto_schema,
-                "system_prompt": "Be precise and thorough. Extract all data maintaining structure and format.",
-                "generate_citations": True  # Enable bbox/page info
+                "system_prompt": "Be precise and thorough. Extract all data maintaining structure and format."
             }
 
             # Enable array extraction for tables and arrays
@@ -211,9 +211,30 @@ class ReductoService:
 
             # Parse citations to get confidence scores and bbox data
             citations_data = {}
-            if hasattr(extract_response, 'citations') and extract_response.citations:
-                citations_data = self._parse_citations(extract_response.citations)
-                logger.info(f"Parsed {len(citations_data)} citations with confidence scores")
+
+            # DEBUG: Check citation availability
+            has_citations_attr = hasattr(extract_response, 'citations')
+            citations_value = extract_response.citations if has_citations_attr else None
+            logger.info(f"Citations check: has_attr={has_citations_attr}, is_none={citations_value is None}, type={type(citations_value)}")
+
+            if has_citations_attr and citations_value:
+                # DEBUG: Log raw citations structure
+                if isinstance(citations_value, list):
+                    logger.info(f"Citations list length: {len(citations_value)}")
+                    if len(citations_value) > 0:
+                        logger.debug(f"First citation sample: {str(citations_value[0])[:500]}")
+
+                citations_data = self._parse_citations(citations_value)
+                logger.info(f"Parsed {len(citations_data)} citations with confidence scores and bbox data")
+
+                # DEBUG: Log fields with/without bbox
+                fields_with_bbox = [f for f, c in citations_data.items() if c.get('bbox')]
+                fields_without_bbox = [f for f, c in citations_data.items() if not c.get('bbox')]
+                logger.info(f"Citations with bbox: {len(fields_with_bbox)}, without bbox: {len(fields_without_bbox)}")
+                if fields_without_bbox:
+                    logger.warning(f"Fields missing bbox: {fields_without_bbox[:5]}")
+            else:
+                logger.warning("No citations returned from Reducto API despite generate_citations=True")
 
             # Parse extractions to include bbox, page, and type information
             extractions = self._parse_extraction_with_complex_types(raw_extractions, schema, citations_data)
@@ -584,6 +605,15 @@ class ReductoService:
                             # Extract bbox and page
                             bbox = first_citation.get("bbox", {})
 
+                            # DEBUG: Log bbox extraction
+                            has_bbox = bool(bbox and isinstance(bbox, dict))
+                            if has_bbox:
+                                bbox_keys = list(bbox.keys()) if isinstance(bbox, dict) else []
+                                has_coords = all(k in bbox for k in ['left', 'top', 'width', 'height'])
+                                logger.debug(f"Field '{field_name}': bbox_keys={bbox_keys}, has_coords={has_coords}")
+                            else:
+                                logger.debug(f"Field '{field_name}': NO bbox in citation (type={type(bbox)})")
+
                             parsed_citations[field_name] = {
                                 "confidence": float(confidence),
                                 "bbox": bbox if isinstance(bbox, dict) else {},
@@ -624,19 +654,38 @@ class ReductoService:
             for field_name, field_data in raw_extractions.items():
                 field_type = field_types.get(field_name, "text")
 
-                # Extract value and metadata
+                # Extract value and metadata - support both v3 format and legacy format
                 if isinstance(field_data, dict) and "value" in field_data:
+                    # V3 format: {"value": "...", "citations": [...]}
                     value = field_data["value"]
-                    confidence = field_data.get("confidence", 0.85)
-                    bbox = field_data.get("bbox")
-                    page = field_data.get("page", 1)
+
+                    # Extract bbox from embedded citations (v3 format)
+                    citations_list = field_data.get("citations", [])
+                    if citations_list and isinstance(citations_list, list) and len(citations_list) > 0:
+                        first_citation = citations_list[0]
+
+                        # Parse bbox from citation
+                        bbox = first_citation.get("bbox", {})
+                        page = bbox.get("page", 1) if isinstance(bbox, dict) else 1
+
+                        # Parse confidence from citation (convert "high"/"medium"/"low" to float)
+                        conf_str = first_citation.get("confidence", "high")
+                        confidence = {"high": 0.9, "medium": 0.7, "low": 0.5}.get(conf_str, 0.85)
+
+                        logger.debug(f"Field '{field_name}' v3 citation: conf={conf_str}→{confidence}, page={page}, bbox_keys={list(bbox.keys()) if bbox else 'none'}")
+                    else:
+                        # No citations in v3 format
+                        confidence = field_data.get("confidence", 0.85)
+                        bbox = field_data.get("bbox")
+                        page = field_data.get("page", 1)
                 else:
+                    # Legacy format: direct value
                     value = field_data
                     confidence = 0.85
                     bbox = None
                     page = None
 
-                # Override with citations data if available (more accurate)
+                # Override with citations data if available (legacy format from top-level citations array)
                 if field_name in citations_data:
                     citation = citations_data[field_name]
                     confidence = citation.get("confidence", confidence)

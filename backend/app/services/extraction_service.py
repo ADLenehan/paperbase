@@ -13,6 +13,7 @@ from app.models.document import ExtractedField
 from app.services.reducto_service import ReductoService
 from app.services.elastic_service import ElasticsearchService
 from app.services.settings_service import SettingsService
+from app.services.validation_service import ExtractionValidator, should_flag_for_review
 from app.core.exceptions import ProcessingError, NotFoundError
 import logging
 
@@ -149,9 +150,27 @@ class ExtractionService:
                     file_path=physical_file.file_path
                 )
 
-            # Step 3: Save extracted fields
+            # Step 3: Validate extracted fields (NEW)
             extracted_data = extraction_result.get("extracted_fields", {})
             confidence_scores = extraction_result.get("confidence_scores", {})
+
+            # Prepare extractions dict for validation
+            extractions_for_validation = {
+                field_name: {
+                    "value": field_value,
+                    "confidence": confidence_scores.get(field_name, 0.0)
+                }
+                for field_name, field_value in extracted_data.items()
+            }
+
+            # Run validation (NEW: uses dynamic Pydantic validation + business rules)
+            validator = ExtractionValidator()
+            validation_results = await validator.validate_extraction(
+                extractions=extractions_for_validation,
+                template=template,  # Use template object for dynamic validation
+                template_name=template.name,  # Also use name for business rules
+                schema_config=None  # Schema is in template object
+            )
 
             # Get review threshold from settings
             settings_service = SettingsService(db)
@@ -164,18 +183,33 @@ class ExtractionService:
                 default=0.6
             )
 
+            # Step 4: Save extracted fields with validation metadata
             for field_name, field_value in extracted_data.items():
                 confidence = confidence_scores.get(field_name, 0.0)
-                needs_verification = confidence < review_threshold
+                validation_result = validation_results.get(field_name)
+
+                # Determine if field needs verification
+                validation_status = validation_result.status if validation_result else "valid"
+                needs_verification = should_flag_for_review(confidence, validation_status)
 
                 extracted_field = ExtractedField(
                     extraction_id=extraction.id,
                     field_name=field_name,
                     field_value=field_value,
                     confidence_score=confidence,
-                    needs_verification=needs_verification
+                    needs_verification=needs_verification,
+                    # NEW: Validation metadata
+                    validation_status=validation_status,
+                    validation_errors=validation_result.errors if validation_result else [],
+                    validation_checked_at=datetime.utcnow()
                 )
                 db.add(extracted_field)
+
+                # Log validation issues
+                if validation_result and validation_result.errors:
+                    logger.warning(
+                        f"Field '{field_name}' has validation errors: {', '.join(validation_result.errors)}"
+                    )
 
             # Step 4: Index in Elasticsearch
             es_doc_id = f"extraction_{extraction.id}"

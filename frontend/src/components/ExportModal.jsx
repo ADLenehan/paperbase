@@ -21,12 +21,20 @@ export default function ExportModal({ isOpen, onClose, templateId = null, docume
   const [summary, setSummary] = useState(null);
   const [template, setTemplate] = useState(null);
 
+  // NEW: Multi-template and complex data support
+  const [expandComplexFields, setExpandComplexFields] = useState(true);
+  const [templateAnalysis, setTemplateAnalysis] = useState(null);
+  const [analyzingTemplates, setAnalyzingTemplates] = useState(false);
+
   useEffect(() => {
     if (isOpen && templateId) {
       fetchTemplate();
       fetchSummary();
+    } else if (isOpen && documentIds && documentIds.length > 0) {
+      // Analyze templates for selected documents
+      analyzeDocumentTemplates();
     }
-  }, [isOpen, templateId, dateFrom, dateTo]);
+  }, [isOpen, templateId, dateFrom, dateTo, documentIds]);
 
   const fetchTemplate = async () => {
     try {
@@ -51,6 +59,64 @@ export default function ExportModal({ isOpen, onClose, templateId = null, docume
     }
   };
 
+  const analyzeDocumentTemplates = async () => {
+    if (!documentIds || documentIds.length === 0) return;
+
+    setAnalyzingTemplates(true);
+    try {
+      // First, fetch the documents to get their template IDs
+      const docsResponse = await apiClient.get('/api/documents', {
+        params: { size: 1000 } // Get enough documents to cover selection
+      });
+      const allDocs = docsResponse.data.documents || [];
+      const selectedDocs = allDocs.filter(doc => documentIds.includes(doc.id));
+
+      // Extract unique template IDs from selected documents
+      // Prioritize schema_id (confirmed template) over suggested_template_id
+      const templateIds = [...new Set(
+        selectedDocs
+          .map(doc => doc.schema_id || doc.suggested_template_id)
+          .filter(id => id != null)
+      )];
+
+      if (templateIds.length === 0) {
+        // No templates assigned yet - show warning
+        setTemplateAnalysis({
+          strategy: "no_templates",
+          document_count: documentIds.length,
+          warning: "Selected documents do not have templates assigned yet. Please assign templates before exporting."
+        });
+        return;
+      }
+
+      // Analyze template compatibility
+      const analysisResponse = await apiClient.post('/api/export/analyze-templates', {
+        template_ids: templateIds
+      });
+
+      setTemplateAnalysis({
+        ...analysisResponse.data,
+        template_count: templateIds.length,
+        document_count: documentIds.length,
+        documents_without_templates: selectedDocs.filter(doc => !doc.schema_id && !doc.suggested_template_id).length
+      });
+
+      // Auto-select recommended format
+      if (analysisResponse.data.recommended_format) {
+        setFormat(analysisResponse.data.recommended_format);
+      }
+    } catch (err) {
+      console.error('Failed to analyze templates:', err);
+      setTemplateAnalysis({
+        strategy: "error",
+        error: err.response?.data?.detail || err.message,
+        document_count: documentIds.length
+      });
+    } finally {
+      setAnalyzingTemplates(false);
+    }
+  };
+
   const handleExport = async () => {
     setLoading(true);
     try {
@@ -69,9 +135,11 @@ export default function ExportModal({ isOpen, onClose, templateId = null, docume
         // Export specific documents
         url = `/api/export/documents?document_ids=${documentIds.join(',')}&format=${format}`;
         if (!includeMetadata) url += '&include_metadata=false';
+        if (format === 'excel' && !expandComplexFields) url += '&expand_complex_fields=false';
       } else if (templateId) {
         // Export by template
         url = `/api/export/template/${templateId}/${format}?${params}`;
+        if (format === 'excel' && !expandComplexFields) url += '&expand_complex_fields=false';
       } else {
         throw new Error('Either templateId or documentIds must be provided');
       }
@@ -177,6 +245,139 @@ export default function ExportModal({ isOpen, onClose, templateId = null, docume
                   </span>
                 </div>
               </div>
+            </div>
+          )}
+
+          {/* Template Analysis (Multi-Template Export) */}
+          {analyzingTemplates && (
+            <div className="bg-gray-50 border border-gray-200 rounded-lg p-4 mb-6">
+              <div className="flex items-center gap-2 text-gray-600">
+                <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                </svg>
+                Analyzing templates...
+              </div>
+            </div>
+          )}
+
+          {templateAnalysis && templateAnalysis.strategy === "no_templates" && (
+            <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-6">
+              <div className="flex items-start gap-2">
+                <svg className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                </svg>
+                <div className="flex-1">
+                  <p className="text-sm font-semibold text-red-900 mb-1">
+                    No Templates Assigned
+                  </p>
+                  <p className="text-xs text-red-800">
+                    {templateAnalysis.warning}
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {templateAnalysis && templateAnalysis.strategy === "error" && (
+            <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-6">
+              <div className="flex items-start gap-2">
+                <svg className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+                <div className="flex-1">
+                  <p className="text-sm font-semibold text-red-900 mb-1">
+                    Analysis Error
+                  </p>
+                  <p className="text-xs text-red-800">
+                    {templateAnalysis.error}
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {templateAnalysis && templateAnalysis.strategy !== "no_templates" && templateAnalysis.strategy !== "error" && (
+            <div className={`border rounded-lg p-4 mb-6 ${
+              templateAnalysis.has_complex_fields
+                ? 'bg-amber-50 border-amber-200'
+                : 'bg-green-50 border-green-200'
+            }`}>
+              <h3 className="text-sm font-semibold mb-3 flex items-center gap-2">
+                {templateAnalysis.template_count > 1 ? (
+                  <>
+                    <span className="text-amber-900">📋 Multi-Template Export</span>
+                  </>
+                ) : (
+                  <>
+                    <span className="text-green-900">📄 Single Template Export</span>
+                  </>
+                )}
+              </h3>
+
+              <div className="grid grid-cols-2 gap-4 text-sm mb-3">
+                <div>
+                  <span className={templateAnalysis.has_complex_fields ? 'text-amber-700' : 'text-green-700'}>
+                    Documents:
+                  </span>
+                  <span className="ml-2 font-semibold">{templateAnalysis.document_count}</span>
+                </div>
+                <div>
+                  <span className={templateAnalysis.has_complex_fields ? 'text-amber-700' : 'text-green-700'}>
+                    Templates:
+                  </span>
+                  <span className="ml-2 font-semibold">{templateAnalysis.template_count}</span>
+                </div>
+              </div>
+
+              {/* Complex Fields Warning */}
+              {templateAnalysis.has_complex_fields && (
+                <div className="bg-amber-100 border border-amber-300 rounded p-3 mb-3">
+                  <div className="flex items-start gap-2">
+                    <svg className="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                    </svg>
+                    <div className="flex-1">
+                      <p className="text-sm font-semibold text-amber-900 mb-1">
+                        Complex Data Detected
+                      </p>
+                      <p className="text-xs text-amber-800">
+                        These documents contain{' '}
+                        <span className="font-semibold">
+                          {templateAnalysis.complex_field_types.join(', ')}
+                        </span>
+                        {' '}fields.
+                        {format === 'excel' ? (
+                          <span> Excel will create separate sheets for table and array_of_objects fields.</span>
+                        ) : format === 'csv' ? (
+                          <span className="font-semibold"> CSV will serialize complex fields as JSON strings (not recommended).</span>
+                        ) : (
+                          <span> JSON preserves the full structure.</span>
+                        )}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Multi-Template Strategy */}
+              {templateAnalysis.template_count > 1 && (
+                <div className="text-sm">
+                  <p className="text-amber-800 mb-1">
+                    <span className="font-semibold">Strategy:</span>{' '}
+                    {templateAnalysis.strategy === 'merged' ? (
+                      <span>Merged (Field overlap: {(templateAnalysis.field_overlap * 100).toFixed(0)}%)</span>
+                    ) : (
+                      <span>Separated by template (Low field overlap: {(templateAnalysis.field_overlap * 100).toFixed(0)}%)</span>
+                    )}
+                  </p>
+                  {templateAnalysis.strategy === 'separated' && format === 'excel' && (
+                    <p className="text-xs text-amber-700 mt-1">
+                      💡 Excel format will create separate sheets for each template
+                    </p>
+                  )}
+                </div>
+              )}
             </div>
           )}
 
@@ -296,6 +497,26 @@ export default function ExportModal({ isOpen, onClose, templateId = null, docume
                   Include confidence scores and verification status
                 </span>
               </label>
+
+              {/* Complex Fields Toggle (Excel only) */}
+              {format === 'excel' && templateAnalysis?.has_complex_fields && (
+                <label className="flex items-start">
+                  <input
+                    type="checkbox"
+                    checked={expandComplexFields}
+                    onChange={(e) => setExpandComplexFields(e.target.checked)}
+                    className="rounded border-gray-300 text-blue-600 focus:ring-blue-500 mt-0.5"
+                  />
+                  <div className="ml-2 flex-1">
+                    <span className="text-sm text-gray-700 font-medium">
+                      Expand complex fields to separate sheets
+                    </span>
+                    <p className="text-xs text-gray-500 mt-0.5">
+                      Create dedicated sheets for tables and arrays with document ID cross-references
+                    </p>
+                  </div>
+                </label>
+              )}
             </div>
           </div>
 
@@ -310,8 +531,8 @@ export default function ExportModal({ isOpen, onClose, templateId = null, docume
             </button>
             <button
               onClick={handleExport}
-              disabled={loading}
-              className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700 disabled:opacity-50 flex items-center gap-2"
+              disabled={loading || templateAnalysis?.strategy === "no_templates" || templateAnalysis?.strategy === "error"}
+              className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
             >
               {loading ? (
                 <>

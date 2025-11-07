@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import FieldEditor from '../components/FieldEditor';
+import ProcessingModal from '../components/modals/ProcessingModal';
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8001';
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
 export default function BulkUpload() {
   const [files, setFiles] = useState([]);
@@ -15,9 +16,77 @@ export default function BulkUpload() {
   const [processing, setProcessing] = useState(false);
   const navigate = useNavigate();
 
+  // NEW: Modal states for modern UX (replaces window.prompt/alert)
+  const [showProcessingModal, setShowProcessingModal] = useState(false);
+  const [currentGroupIndex, setCurrentGroupIndex] = useState(null);
+  const [processingDocuments, setProcessingDocuments] = useState([]);
+  const [previewFields, setPreviewFields] = useState(null);
+  const [showFieldPreview, setShowFieldPreview] = useState(false);
+  const [pendingTemplateName, setPendingTemplateName] = useState('');
+  const [processingGroupIndex, setProcessingGroupIndex] = useState(null); // Track which group is being processed via "Use This Template"
+
+  // NEW: Track extracting state per group
+  const [extractingGroups, setExtractingGroups] = useState(new Set()); // Set of group indices that are extracting
+  const [completedGroups, setCompletedGroups] = useState(new Set()); // Set of group indices that finished extraction
+
   useEffect(() => {
     fetchTemplates();
   }, []);
+
+  // NEW: Poll document status for extracting groups
+  useEffect(() => {
+    if (extractingGroups.size === 0) return;
+
+    const pollInterval = setInterval(async () => {
+      // Check status of all extracting groups
+      for (const groupIdx of extractingGroups) {
+        const group = documentGroups[groupIdx];
+        if (!group) continue;
+
+        try {
+          // Fetch status of all documents in this group
+          const statusPromises = group.document_ids.map(docId =>
+            fetch(`${API_URL}/api/documents/${docId}`).then(r => r.json())
+          );
+          const docStatuses = await Promise.all(statusPromises);
+
+          // Check if all documents are completed or have errors
+          const allDone = docStatuses.every(doc =>
+            doc.status === 'completed' || doc.status === 'verified' || doc.status === 'error'
+          );
+
+          if (allDone) {
+            // Move group from extracting to completed
+            setExtractingGroups(prev => {
+              const newSet = new Set(prev);
+              newSet.delete(groupIdx);
+              return newSet;
+            });
+            setCompletedGroups(prev => new Set(prev).add(groupIdx));
+
+            console.log(`Group ${groupIdx} extraction complete!`);
+          }
+        } catch (err) {
+          console.error(`Failed to poll status for group ${groupIdx}:`, err);
+        }
+      }
+    }, 3000); // Poll every 3 seconds
+
+    return () => clearInterval(pollInterval);
+  }, [extractingGroups, documentGroups]);
+
+  // NEW: Auto-navigate when all groups are processed and completed
+  useEffect(() => {
+    if (!documentGroups.length) return;
+
+    const allProcessed = documentGroups.every(g => g.auto_processed);
+    const allCompleted = documentGroups.every((g, idx) => completedGroups.has(idx));
+
+    if (allProcessed && allCompleted) {
+      console.log('All groups processed and completed! Navigating to documents...');
+      setTimeout(() => navigate('/documents'), 1500);
+    }
+  }, [documentGroups, completedGroups, navigate]);
 
   const fetchTemplates = async () => {
     try {
@@ -30,19 +99,31 @@ export default function BulkUpload() {
   };
 
   const handleFileSelect = (e) => {
+    console.log('📁 handleFileSelect called');
     const selectedFiles = Array.from(e.target.files);
+    console.log('Selected files:', selectedFiles);
     setFiles(selectedFiles);
   };
 
   const handleDrop = (e) => {
+    console.log('📁 handleDrop called');
     e.preventDefault();
     const droppedFiles = Array.from(e.dataTransfer.files);
+    console.log('Dropped files:', droppedFiles);
     setFiles(droppedFiles);
   };
 
   const handleUploadAndAnalyze = async () => {
-    if (files.length === 0) return;
+    console.log('📤 handleUploadAndAnalyze called');
+    console.log('Files:', files);
+    console.log('Files length:', files.length);
 
+    if (files.length === 0) {
+      console.log('❌ No files selected, returning early');
+      return;
+    }
+
+    console.log('✅ Starting upload process...');
     setUploading(true);
     setError(null);
     setProgress({ stage: 'uploading', current: 0, total: files.length, message: 'Uploading files...' });
@@ -98,10 +179,7 @@ export default function BulkUpload() {
       setDocumentGroups(groups);
       setAnalysis(data);
 
-      // Show analytics if available
-      if (data.analytics) {
-        console.log('Matching Analytics:', data.analytics);
-      }
+      // Analytics available in data.analytics if needed for debugging
     } catch (err) {
       setError(err.message);
     } finally {
@@ -133,44 +211,83 @@ export default function BulkUpload() {
     setProcessing(true);
     setError(null);
 
+    const errors = [];
+    const successes = [];
+    const updatedGroups = [...documentGroups];
+
     try {
-      // Process each group based on selection
-      for (const group of documentGroups) {
-        if (group.isNewTemplate) {
-          // Create new template
-          const response = await fetch(`${API_URL}/api/bulk/create-new-template`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              document_ids: group.document_ids,
-              template_name: group.templateName
-            }),
-          });
+      // Process each group based on selection (only unprocessed groups)
+      for (const [index, group] of documentGroups.entries()) {
+        // Skip already processed groups
+        if (group.auto_processed) {
+          continue;
+        }
 
-          if (!response.ok) {
-            throw new Error(`Failed to create template for ${group.templateName}`);
-          }
-        } else if (group.selectedTemplateId) {
-          // Use existing template
-          const response = await fetch(`${API_URL}/api/bulk/confirm-template`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              document_ids: group.document_ids,
-              template_id: group.selectedTemplateId
-            }),
-          });
+        try {
+          if (group.isNewTemplate) {
+            // Create new template
+            const response = await fetch(`${API_URL}/api/bulk/create-new-template`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                document_ids: group.document_ids,
+                template_name: group.templateName
+              }),
+            });
 
-          if (!response.ok) {
-            throw new Error(`Failed to process group ${group.suggested_name}`);
+            if (!response.ok) {
+              const errorData = await response.json().catch(() => ({}));
+              throw new Error(errorData.detail || `HTTP ${response.status}`);
+            }
+
+            // Mark as processed
+            updatedGroups[index] = { ...updatedGroups[index], auto_processed: true };
+            successes.push({ group: group.templateName, index });
+          } else if (group.selectedTemplateId) {
+            // Use existing template
+            const response = await fetch(`${API_URL}/api/bulk/confirm-template`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                document_ids: group.document_ids,
+                template_id: group.selectedTemplateId
+              }),
+            });
+
+            if (!response.ok) {
+              const errorData = await response.json().catch(() => ({}));
+              throw new Error(errorData.detail || `HTTP ${response.status}`);
+            }
+
+            // Mark as processed
+            updatedGroups[index] = { ...updatedGroups[index], auto_processed: true };
+            successes.push({ group: group.suggested_name, index });
           }
+        } catch (err) {
+          errors.push({
+            group: group.templateName || group.suggested_name,
+            index,
+            error: err.message
+          });
         }
       }
 
-      // Navigate to documents dashboard to see processing status
-      navigate('/documents');
-    } catch (err) {
-      setError(err.message);
+      // Update state
+      setDocumentGroups(updatedGroups);
+
+      // Show results
+      if (errors.length > 0 && successes.length > 0) {
+        // Partial failure
+        setError(`Processed ${successes.length}/${documentGroups.length} groups successfully. Failed: ${errors.map(e => `"${e.group}" (${e.error})`).join(', ')}`);
+        // Still navigate to see successful ones
+        setTimeout(() => navigate('/documents'), 2000);
+      } else if (errors.length > 0) {
+        // Complete failure
+        setError(`Failed to process all groups: ${errors.map(e => `"${e.group}" (${e.error})`).join(', ')}`);
+      } else {
+        // Complete success - navigate immediately
+        setTimeout(() => navigate('/documents'), 1000);
+      }
     } finally {
       setProcessing(false);
     }
@@ -211,16 +328,132 @@ export default function BulkUpload() {
         throw new Error(data.detail || 'Template creation failed');
       }
 
-      // Show notification if potential matches found
-      if (data.potential_matches && data.potential_matches.length > 0) {
-        alert(`✨ Template created! Found ${data.rematch_count} potential matches. Check the Documents dashboard to review them.`);
-      }
+      // Potential matches available in data.potential_matches if needed
+      // User will see matched documents in the documents dashboard
 
       // Navigate to schema editing
       navigate(`/schema/${data.schema_id}`);
     } catch (err) {
       setError(err.message);
     }
+  };
+
+
+  const handleFinalizeTemplate = async (fieldData) => {
+    console.log('🚀🚀🚀 handleFinalizeTemplate CALLED 🚀🚀🚀');
+    console.log('currentGroupIndex:', currentGroupIndex);
+    console.log('fieldData:', fieldData);
+    console.log('documentGroups:', documentGroups);
+
+    if (currentGroupIndex === null) {
+      console.error('❌ currentGroupIndex is NULL - EARLY RETURN!');
+      setError('Internal error: No group selected. Please try again.');
+      return;
+    }
+
+    console.log('✅ currentGroupIndex is valid, proceeding...');
+    const group = documentGroups[currentGroupIndex];
+    console.log('group:', group);
+
+    if (!group) {
+      console.error('❌ Group not found at index', currentGroupIndex);
+      setError('Internal error: Group not found. Please try again.');
+      return;
+    }
+
+    try {
+      setProcessing(true);
+      setError(null);
+
+      // Extract fields array from FieldEditor's return object
+      // FieldEditor returns: { fields: [...], name: "...", isNewTemplate: bool }
+      const finalFields = Array.isArray(fieldData) ? fieldData : fieldData.fields;
+
+      const requestBody = {
+        document_ids: group.document_ids,
+        template_name: pendingTemplateName,
+        fields: finalFields
+      };
+
+      console.log('=== CREATE TEMPLATE REQUEST ===');
+      console.log('API URL:', `${API_URL}/api/bulk/create-new-template`);
+      console.log('Document IDs:', group.document_ids);
+      console.log('Template Name:', pendingTemplateName);
+      console.log('Fields Count:', finalFields?.length);
+      console.log('First field:', finalFields?.[0]);
+      console.log('Request body:', requestBody);
+      console.log('Stringified body:', JSON.stringify(requestBody));
+
+      // Create template with user-confirmed fields
+      console.log('Making fetch request...');
+      const response = await fetch(`${API_URL}/api/bulk/create-new-template`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(requestBody),
+      });
+      console.log('Fetch completed, response status:', response.status);
+
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({ detail: `HTTP ${response.status}` }));
+        console.error('Template creation failed:', data);
+
+        // Handle specific errors
+        let errorMessage = data.detail || data.message || 'Template creation failed';
+
+        // Check for duplicate name error
+        if (response.status === 500 && (errorMessage.includes('UNIQUE') || errorMessage.includes('unique'))) {
+          errorMessage = `A template named "${pendingTemplateName}" already exists. Please try a different name.`;
+        }
+
+        throw new Error(errorMessage);
+      }
+
+      const data = await response.json();
+      console.log('Template created successfully:', data);
+
+      // Mark this group as processed (extraction started on backend)
+      const updatedGroups = [...documentGroups];
+      updatedGroups[currentGroupIndex] = {
+        ...updatedGroups[currentGroupIndex],
+        auto_processed: true,
+        selectedTemplateId: data.schema_id,
+        templateName: pendingTemplateName
+      };
+      setDocumentGroups(updatedGroups);
+
+      // Mark group as extracting (will be polled for completion)
+      setExtractingGroups(prev => new Set(prev).add(currentGroupIndex));
+
+      // Close preview and reset state
+      setShowFieldPreview(false);
+      setPreviewFields(null);
+      setPendingTemplateName('');
+      setCurrentGroupIndex(null);
+      setProcessing(false);
+
+      // Refresh templates list
+      fetchTemplates();
+
+      // Check if all groups are processed
+      const remainingGroups = updatedGroups.filter(g => !g.auto_processed);
+      console.log(`Template created! Remaining groups: ${remainingGroups.length}/${updatedGroups.length}`);
+
+      if (remainingGroups.length === 0) {
+        // All groups processed! Wait for extractions to complete before navigating
+        console.log('All groups processing started! Waiting for extractions to complete...');
+      }
+    } catch (err) {
+      console.error('Error in handleFinalizeTemplate:', err);
+      setError(err.message || 'Failed to create template. Check console for details.');
+      setProcessing(false);
+    }
+  };
+
+  const handleCancelFieldPreview = () => {
+    setShowFieldPreview(false);
+    setPreviewFields(null);
+    setPendingTemplateName('');
+    setCurrentGroupIndex(null);
   };
 
   return (
@@ -238,6 +471,7 @@ export default function BulkUpload() {
             <input
               type="file"
               multiple
+              accept=".pdf,.png,.jpg,.jpeg,.doc,.docx"
               onChange={handleFileSelect}
               className="hidden"
               id="file-input"
@@ -291,49 +525,43 @@ export default function BulkUpload() {
             <div>
               <h2 className="text-2xl font-bold text-gray-900">Review & Process Documents</h2>
               <p className="text-gray-600 mt-1">
-                {analysis.total_documents} documents grouped into {documentGroups.length} template{documentGroups.length !== 1 ? 's' : ''}.
-                Review and assign templates below.
+                {(() => {
+                  const processedCount = documentGroups.filter(g => g.auto_processed).length;
+                  const totalGroups = documentGroups.length;
+                  const remainingGroups = totalGroups - processedCount;
+
+                  if (processedCount > 0) {
+                    return `${processedCount} of ${totalGroups} groups processed. ${remainingGroups > 0 ? `${remainingGroups} remaining.` : 'All done!'}`;
+                  }
+                  return `${analysis.total_documents} documents grouped into ${totalGroups} template${totalGroups !== 1 ? 's' : ''}. Review and assign templates below.`;
+                })()}
               </p>
             </div>
             <button
               onClick={handleProcessAll}
-              disabled={processing || documentGroups.some(g => !g.selectedTemplateId && !g.isNewTemplate)}
+              disabled={
+                processing ||
+                // Only disable if NO groups are ready to process
+                !documentGroups.some(g =>
+                  !g.auto_processed && (g.selectedTemplateId || g.isNewTemplate)
+                )
+              }
               className="px-6 py-3 bg-periwinkle-500 text-white rounded-lg font-medium hover:bg-periwinkle-600 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
             >
-              {processing ? 'Processing...' : `Process All (${analysis.total_documents} docs)`}
+              {processing ? 'Processing...' : (() => {
+                const processableGroups = documentGroups.filter(g =>
+                  !g.auto_processed && (g.selectedTemplateId || g.isNewTemplate)
+                );
+                return processableGroups.length > 0
+                  ? `Process ${processableGroups.length} Group${processableGroups.length !== 1 ? 's' : ''}`
+                  : 'No Groups Ready';
+              })()}
             </button>
           </div>
 
           {error && (
             <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg">
               {error}
-            </div>
-          )}
-
-          {/* Analytics Display */}
-          {analysis.analytics && (
-            <div className="bg-gray-50 rounded-lg p-4 border border-gray-200">
-              <h4 className="font-semibold text-gray-700 mb-3 text-sm">Matching Analytics</h4>
-              <div className="grid grid-cols-3 gap-4">
-                <div className="bg-white rounded-lg p-3 border border-gray-200">
-                  <div className="text-xs text-gray-500 mb-1">Fast Matches (ES)</div>
-                  <div className="text-2xl font-bold text-mint-600">
-                    ⚡ {analysis.analytics.elasticsearch_matches}
-                  </div>
-                </div>
-                <div className="bg-white rounded-lg p-3 border border-gray-200">
-                  <div className="text-xs text-gray-500 mb-1">AI Matches (Claude)</div>
-                  <div className="text-2xl font-bold text-periwinkle-600">
-                    🧠 {analysis.analytics.claude_fallback_matches}
-                  </div>
-                </div>
-                <div className="bg-white rounded-lg p-3 border border-gray-200">
-                  <div className="text-xs text-gray-500 mb-1">Estimated Cost</div>
-                  <div className="text-2xl font-bold text-green-600">
-                    💰 {analysis.analytics.cost_estimate}
-                  </div>
-                </div>
-              </div>
             </div>
           )}
 
@@ -349,17 +577,123 @@ export default function BulkUpload() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-200">
-                {documentGroups.map((group, idx) => (
-                  <DocumentGroupRow
-                    key={idx}
-                    group={group}
-                    groupIndex={idx}
-                    availableTemplates={availableTemplates}
-                    onTemplateChange={updateGroupTemplate}
-                    onTemplateNameChange={updateGroupTemplateName}
-                    onTogglePreview={toggleFieldPreview}
-                  />
-                ))}
+                {(() => {
+                  const remainingGroups = documentGroups.filter(group => !group.auto_processed);
+
+                  if (remainingGroups.length === 0) {
+                    // All groups processed!
+                    return (
+                      <tr>
+                        <td colSpan="4" className="px-6 py-12 text-center">
+                          <div className="flex flex-col items-center justify-center space-y-3">
+                            <div className="text-xl font-semibold text-gray-900">All Groups Processed!</div>
+                            <div className="text-sm text-gray-600">
+                              Extraction started for all {analysis.total_documents} documents. Redirecting to documents page...
+                            </div>
+                            <div className="mt-4">
+                              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-periwinkle-500"></div>
+                            </div>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  }
+
+                  return remainingGroups.map((group, idx) => {
+                    // Find original index for callbacks
+                    const originalIndex = documentGroups.findIndex(g => g === group);
+                    return (
+                      <DocumentGroupRow
+                        key={originalIndex}
+                        group={group}
+                        groupIndex={originalIndex}
+                        availableTemplates={availableTemplates}
+                        isExtracting={extractingGroups.has(originalIndex)}
+                        isCompleted={completedGroups.has(originalIndex)}
+                        onTemplateChange={updateGroupTemplate}
+                        onTemplateNameChange={updateGroupTemplateName}
+                        onTogglePreview={toggleFieldPreview}
+                        onCreateNewTemplate={async (groupIdx) => {
+                          console.log('Create New Template clicked for group', groupIdx);
+                          setCurrentGroupIndex(groupIdx);
+
+                          const group = documentGroups[groupIdx];
+
+                          try {
+                            // Generate AI-suggested fields
+                            setProcessing(true);
+                            setError(null);
+
+                            const response = await fetch(`${API_URL}/api/bulk/generate-schema`, {
+                              method: 'POST',
+                              headers: { 'Content-Type': 'application/json' },
+                              body: JSON.stringify({
+                                document_ids: group.document_ids,
+                                template_name: group.suggested_name || 'New Template'
+                              }),
+                            });
+
+                            const data = await response.json();
+
+                            if (!response.ok) {
+                              throw new Error(data.detail || 'Schema generation failed');
+                            }
+
+                            // Show field preview with suggested template name
+                            setPendingTemplateName(group.suggested_name || 'New Template');
+                            setPreviewFields(data.suggested_fields || []);
+                            setShowFieldPreview(true);
+                            setProcessing(false);
+                          } catch (err) {
+                            setError(err.message);
+                            setProcessing(false);
+                          }
+                        }}
+                        onUseTemplate={async (groupIdx) => {
+                          // Handle "Use This Template" button click
+                          setProcessingGroupIndex(groupIdx);
+                          try {
+                            const g = documentGroups[groupIdx];
+                            const response = await fetch(`${API_URL}/api/bulk/confirm-template`, {
+                              method: 'POST',
+                              headers: { 'Content-Type': 'application/json' },
+                              body: JSON.stringify({
+                                document_ids: g.document_ids,
+                                template_id: g.template_match.template_id
+                              }),
+                            });
+
+                            if (!response.ok) {
+                              const errorData = await response.json().catch(() => ({}));
+                              throw new Error(errorData.detail || `HTTP ${response.status}`);
+                            }
+
+                            // Mark as processed
+                            const updatedGroups = [...documentGroups];
+                            updatedGroups[groupIdx] = { ...updatedGroups[groupIdx], auto_processed: true };
+                            setDocumentGroups(updatedGroups);
+
+                            // Mark group as extracting (will be polled for completion)
+                            setExtractingGroups(prev => new Set(prev).add(groupIdx));
+
+                            // Check if all done
+                            const remainingGroups = updatedGroups.filter(g => !g.auto_processed);
+                            if (remainingGroups.length === 0) {
+                              console.log('All groups processing started! Waiting for extractions to complete...');
+                            }
+                          } catch (err) {
+                            setError(`Failed to process group: ${err.message}`);
+                          } finally {
+                            setProcessingGroupIndex(null);
+                          }
+                        }}
+                        processingGroupIndex={processingGroupIndex}
+                        setError={setError}
+                        isProcessing={processing && currentGroupIndex === originalIndex}
+                      />
+                    );
+                  });
+                })()}
               </tbody>
             </table>
           </div>
@@ -368,19 +702,103 @@ export default function BulkUpload() {
             <div className="flex items-center gap-4">
               <div className="flex items-center gap-2">
                 <div className="w-3 h-3 bg-mint-500 rounded-full"></div>
-                <span>High confidence ({'>'}70%)</span>
+                <span>Good match (≥70% - can use template)</span>
               </div>
               <div className="flex items-center gap-2">
                 <div className="w-3 h-3 bg-yellow-500 rounded-full"></div>
-                <span>Medium confidence (50-70%)</span>
+                <span>Uncertain (50-70% - review carefully)</span>
               </div>
               <div className="flex items-center gap-2">
-                <div className="w-3 h-3 bg-gray-400 rounded-full"></div>
-                <span>Low confidence ({'<'}50%)</span>
+                <div className="w-3 h-3 bg-red-500 rounded-full"></div>
+                <span>Poor match ({'<'}50% - create new template)</span>
               </div>
             </div>
             <div>
               Need help? <a href="#" className="text-periwinkle-600 hover:underline">View guide</a>
+            </div>
+          </div>
+        </div>
+      )}
+
+
+      {/* NEW: Processing Modal (live progress feedback) */}
+      <ProcessingModal
+        isOpen={showProcessingModal}
+        documents={processingDocuments}
+        onClose={() => setShowProcessingModal(false)}
+        onComplete={() => {
+          setShowProcessingModal(false);
+          navigate('/documents');
+        }}
+      />
+
+      {/* NEW: Field Preview Modal - Review AI-suggested fields before creating template */}
+      {showFieldPreview && previewFields && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg shadow-xl w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col">
+            {/* Header */}
+            <div className="px-6 py-4 border-b border-gray-200 bg-gray-50">
+              <div className="flex items-start justify-between">
+                <div className="flex-1">
+                  <h2 className="text-xl font-semibold text-gray-900 mb-3">
+                    Review Template Fields
+                  </h2>
+                  {/* Editable template name */}
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium text-gray-700">Template Name</label>
+                    <input
+                      type="text"
+                      value={pendingTemplateName}
+                      onChange={(e) => {
+                        setPendingTemplateName(e.target.value);
+                        // Clear error when user starts editing (especially for duplicate name errors)
+                        if (error) setError(null);
+                      }}
+                      disabled={processing}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-periwinkle-500 focus:border-periwinkle-500 disabled:bg-gray-100 disabled:cursor-not-allowed"
+                      placeholder="Enter template name"
+                    />
+                    <p className="text-xs text-gray-500">
+                      Review AI-suggested fields below and edit as needed before saving.
+                    </p>
+                  </div>
+                </div>
+                {/* Close button */}
+                <button
+                  onClick={handleCancelFieldPreview}
+                  disabled={processing}
+                  className="ml-4 text-gray-400 hover:text-gray-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  aria-label="Close modal"
+                >
+                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+              {error && (
+                <div className="mt-3 bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm flex items-start justify-between">
+                  <span className="flex-1">{error}</span>
+                  <button
+                    onClick={() => setError(null)}
+                    className="ml-2 text-red-500 hover:text-red-700 font-bold"
+                  >
+                    ×
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {/* Field Editor */}
+            <div className="flex-1 overflow-y-auto p-6">
+              <FieldEditor
+                templateId={null}
+                templateName={pendingTemplateName}
+                initialFields={previewFields}
+                onSave={handleFinalizeTemplate}
+                onCancel={handleCancelFieldPreview}
+                isNewTemplate={true}
+                isSaving={processing}
+              />
             </div>
           </div>
         </div>
@@ -455,13 +873,23 @@ function ProgressDisplay({ progress }) {
   );
 }
 
-function DocumentGroupRow({ group, groupIndex, availableTemplates, onTemplateChange, onTemplateNameChange, onTogglePreview }) {
+function DocumentGroupRow({ group, groupIndex, availableTemplates, isExtracting, isCompleted, onTemplateChange, onTemplateNameChange, onTogglePreview, onCreateNewTemplate, onUseTemplate, processingGroupIndex, setError, isProcessing = false }) {
+  const navigate = useNavigate();
   const confidence = group.template_match.confidence;
-  const confidenceColor = confidence >= 0.75 ? 'bg-mint-500' : confidence >= 0.6 ? 'bg-yellow-500' : 'bg-gray-400';
+  // Updated color thresholds: 70%+ = green, 50-70% = yellow, <50% = red
+  const confidenceColor = confidence >= 0.70 ? 'bg-mint-500' : confidence >= 0.50 ? 'bg-yellow-500' : 'bg-red-500';
   const matchSource = group.template_match.match_source || 'unknown';
   const [templateFields, setTemplateFields] = useState(null);
   const [loadingFields, setLoadingFields] = useState(false);
   const [showFieldEditor, setShowFieldEditor] = useState(false);
+
+  // Smart default action based on confidence and match
+  const getDefaultAction = (confidence, hasTemplate) => {
+    if (!hasTemplate) return 'create';
+    if (confidence >= 0.75) return 'use';
+    if (confidence >= 0.5) return 'review';
+    return 'change';
+  };
 
   // Match source display
   const sourceIcon = matchSource === 'elasticsearch' ? '⚡' : matchSource === 'claude' ? '🧠' : '❓';
@@ -504,7 +932,8 @@ function DocumentGroupRow({ group, groupIndex, availableTemplates, onTemplateCha
 
   const handleOpenFieldEditor = () => {
     if (!group.selectedTemplateId && !group.isNewTemplate) {
-      alert('Please select a template first');
+      // Better UX: Show inline error message instead of alert
+      setError('Please select a template first');
       return;
     }
 
@@ -544,13 +973,15 @@ function DocumentGroupRow({ group, groupIndex, availableTemplates, onTemplateCha
         {/* Template Display */}
         <td className="px-6 py-4">
           <div className="flex items-start gap-2">
-            {group.template_match.template_id ? (
-              <span className="text-yellow-500 text-sm">✨</span>
-            ) : null}
             <div>
               <div className="text-sm font-medium text-gray-900">
                 {group.templateName || 'No template selected'}
               </div>
+              {confidence < 0.70 && group.template_match.template_id && (
+                <div className="text-xs text-red-600 font-medium mt-1">
+                  Low confidence - recommend creating new template
+                </div>
+              )}
               {group.template_match.reasoning && (
                 <div className="text-xs text-gray-500 mt-1 max-w-xs">
                   {group.template_match.reasoning.slice(0, 80)}...
@@ -562,43 +993,91 @@ function DocumentGroupRow({ group, groupIndex, availableTemplates, onTemplateCha
 
         {/* Match Confidence */}
         <td className="px-6 py-4">
-          <div className="flex flex-col gap-2">
-            <div className="flex items-center gap-2">
-              <div className={`w-3 h-3 rounded-full ${confidenceColor}`}></div>
-              <span className="text-sm font-medium text-gray-700">
-                {Math.round(confidence * 100)}%
-              </span>
-            </div>
-            {/* Match source badge */}
+          {confidence < 0.70 ? (
+            <span className="px-4 py-2 rounded-lg border-2 border-red-500 text-red-500 text-sm font-medium inline-flex items-center justify-center w-fit">
+              {Math.round(confidence * 100)}%
+            </span>
+          ) : (
             <span className={`text-xs px-2 py-1 rounded ${sourceBgColor} inline-flex items-center gap-1 w-fit`}>
               <span>{sourceIcon}</span>
               <span>{sourceLabel}</span>
             </span>
-          </div>
+          )}
         </td>
 
-        {/* Actions - Single Explore Dropdown */}
+        {/* Actions - Simple Per-Group Buttons */}
         <td className="px-6 py-4">
-          <select
-            onChange={(e) => {
-              const value = e.target.value;
-              if (value === 'edit') {
-                handleOpenFieldEditor();
-              } else if (value === 'change') {
-                // Show template selector inline
-                const newTemplateId = prompt('Enter template ID or "new" for new template:');
-                if (newTemplateId) {
-                  handleTemplateChange(newTemplateId === 'new' ? 'new' : parseInt(newTemplateId));
-                }
-              }
-              e.target.value = ''; // Reset dropdown
-            }}
-            className="px-4 py-2 text-sm border border-gray-300 rounded-lg bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-periwinkle-500 cursor-pointer"
-          >
-            <option value="">Explore ▼</option>
-            <option value="edit">✏️ Edit Template Fields</option>
-            <option value="change">🔄 Change Template</option>
-          </select>
+          <div className="flex flex-col gap-2">
+            {/* Show "View in Documents" link if extraction is complete */}
+            {isCompleted ? (
+              <button
+                onClick={() => navigate('/documents')}
+                className="px-4 py-2 bg-periwinkle-500 text-white rounded-lg text-sm font-medium hover:bg-periwinkle-600 transition-colors inline-flex items-center justify-center gap-2"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                <span>View in Documents</span>
+              </button>
+            ) : isExtracting ? (
+              /* Show "Extracting..." while extraction is in progress */
+              <div className="px-4 py-2 bg-sky-100 text-sky-700 rounded-lg text-sm font-medium inline-flex items-center justify-center gap-2">
+                <svg className="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+                <span>Extracting...</span>
+              </div>
+            ) : (
+              <>
+                {/* Show "Use This Template" if ES found a match with confidence >= 0.70 */}
+                {group.template_match.template_id && confidence >= 0.70 ? (
+                  <button
+                    onClick={() => onUseTemplate(groupIndex)}
+                    disabled={processingGroupIndex === groupIndex}
+                    className="px-4 py-2 bg-mint-500 text-white rounded-lg text-sm font-medium hover:bg-mint-600 transition-colors inline-flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {processingGroupIndex === groupIndex ? (
+                      <>
+                        <svg className="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                        </svg>
+                        <span>Processing...</span>
+                      </>
+                    ) : (
+                      <span>Use This Template</span>
+                    )}
+                  </button>
+                ) : null}
+
+                {/* Always show "Create New Template" button */}
+                <button
+                  onClick={() => {
+                    console.log('Button clicked for group', groupIndex);
+                    onCreateNewTemplate(groupIndex);
+                  }}
+                  disabled={isProcessing}
+                  className="px-4 py-2 bg-periwinkle-500 text-white rounded-lg text-sm font-medium hover:bg-periwinkle-600 transition-colors inline-flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {isProcessing ? (
+                    <>
+                      <svg className="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                      </svg>
+                      <span>Generating...</span>
+                    </>
+                  ) : (
+                    <>
+                      <span>✨</span>
+                      <span>Create New Template</span>
+                    </>
+                  )}
+                </button>
+              </>
+            )}
+          </div>
         </td>
       </tr>
 

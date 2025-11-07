@@ -1,5 +1,6 @@
 from pydantic_settings import BaseSettings
 from typing import Optional
+import secrets
 
 
 class Settings(BaseSettings):
@@ -16,6 +17,12 @@ class Settings(BaseSettings):
     # Server
     BACKEND_HOST: str = "0.0.0.0"
     BACKEND_PORT: int = 8000
+    FRONTEND_URL: str = "http://localhost:3000"  # For MCP web UI links
+
+    # Authentication & Security
+    SECRET_KEY: str = secrets.token_urlsafe(32)  # Generated if not provided
+    ALGORITHM: str = "HS256"
+    ACCESS_TOKEN_EXPIRE_HOURS: int = 24  # JWT tokens expire after 24 hours
 
     # File Upload
     MAX_UPLOAD_SIZE_MB: int = 50

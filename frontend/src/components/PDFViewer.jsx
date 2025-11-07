@@ -26,6 +26,7 @@ export default function PDFViewer({
 }) {
   const [numPages, setNumPages] = useState(null);
   const [pageWidth, setPageWidth] = useState(600);
+  const [pageHeight, setPageHeight] = useState(800); // Add page height for bbox scaling
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
@@ -35,7 +36,6 @@ export default function PDFViewer({
   }
 
   function onDocumentLoadError(error) {
-    console.error('Error loading PDF:', error);
     setError('Failed to load PDF');
     setLoading(false);
   }
@@ -166,6 +166,12 @@ export default function PDFViewer({
             <Page
               pageNumber={page}
               width={pageWidth * zoom}
+              onLoadSuccess={(pageData) => {
+                // Capture actual page dimensions for bbox scaling
+                const viewport = pageData.getViewport({ scale: 1 });
+                setPageWidth(viewport.width);
+                setPageHeight(viewport.height);
+              }}
               renderTextLayer={true}
               renderAnnotationLayer={true}
             />
@@ -176,6 +182,7 @@ export default function PDFViewer({
             <BBoxOverlays
               highlights={highlights}
               pageWidth={pageWidth * zoom}
+              pageHeight={pageHeight * zoom}
               currentPage={page}
             />
           )}
@@ -188,15 +195,33 @@ export default function PDFViewer({
 /**
  * BBoxOverlays component - renders bounding boxes over PDF
  */
-function BBoxOverlays({ highlights, pageWidth, currentPage }) {
+function BBoxOverlays({ highlights, pageWidth, pageHeight, currentPage }) {
   return (
     <div className="absolute top-0 left-0 pointer-events-none">
       {highlights
         .filter(h => !h.page || h.page === currentPage)
         .map((highlight, index) => {
-          if (!highlight.bbox || highlight.bbox.length < 4) return null;
+          if (!highlight.bbox) return null;
 
-          const [x, y, width, height] = highlight.bbox;
+          // Handle both array and object formats
+          // Bbox coordinates from Reducto are NORMALIZED [0-1], need to scale by page dimensions
+          let x, y, width, height;
+          if (Array.isArray(highlight.bbox)) {
+            if (highlight.bbox.length < 4) return null;
+            [x, y, width, height] = highlight.bbox;
+          } else {
+            x = highlight.bbox.left || 0;
+            y = highlight.bbox.top || 0;
+            width = highlight.bbox.width || 0;
+            height = highlight.bbox.height || 0;
+          }
+
+          // Scale normalized coordinates [0-1] to pixel coordinates
+          // pageWidth and pageHeight already include zoom
+          const pixelX = x * pageWidth;
+          const pixelY = y * pageHeight;
+          const pixelWidth = width * pageWidth;
+          const pixelHeight = height * pageHeight;
 
           // Color mapping based on confidence or explicit color
           const colorMap = {
@@ -213,10 +238,10 @@ function BBoxOverlays({ highlights, pageWidth, currentPage }) {
               key={index}
               className={`absolute border-2 ${colorClass} bg-opacity-10 pointer-events-auto cursor-pointer transition-opacity hover:bg-opacity-20`}
               style={{
-                left: `${x}px`,
-                top: `${y}px`,
-                width: `${width}px`,
-                height: `${height}px`
+                left: `${pixelX}px`,
+                top: `${pixelY}px`,
+                width: `${pixelWidth}px`,
+                height: `${pixelHeight}px`
               }}
               title={highlight.label || 'Extraction'}
             >

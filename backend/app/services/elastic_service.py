@@ -19,22 +19,28 @@ class ElasticsearchService:
         # Build field mappings from schema with multi-field support
         properties = {}
         for field in schema.get("fields", []):
-            field_type = self._get_es_field_type(field["type"])
+            field_name = field["name"]
+            field_type = field.get("type", "text")
 
-            # Multi-field configuration for flexible querying
-            field_config = {"type": field_type}
+            # Handle complex types (array, table, array_of_objects)
+            if field_type in ["array", "array_of_objects", "table"]:
+                properties[field_name] = self._build_complex_field_mapping(field)
+            else:
+                # Simple types
+                es_field_type = self._get_es_field_type(field_type)
+                field_config = {"type": es_field_type}
 
-            # Add keyword sub-field for text fields (exact matching)
-            if field_type == "text":
-                field_config["fields"] = {
-                    "keyword": {
-                        "type": "keyword",
-                        "ignore_above": 256  # Prevent indexing failures on long text
+                # Add keyword sub-field for text fields (exact matching)
+                if es_field_type == "text":
+                    field_config["fields"] = {
+                        "keyword": {
+                            "type": "keyword",
+                            "ignore_above": 256  # Prevent indexing failures on long text
+                        }
+                        # Removed .raw sub-field (redundant, saves 30-40% storage)
                     }
-                    # Removed .raw sub-field (redundant, saves 30-40% storage)
-                }
 
-            properties[field["name"]] = field_config
+                properties[field_name] = field_config
 
             # NEW: Add metadata sub-document for each field
             properties[f"{field['name']}_meta"] = {
@@ -95,6 +101,32 @@ class ElasticsearchService:
             "_field_index": {
                 "type": "text",
                 "analyzer": "standard"
+            },
+            # NEW: Citation metadata for trustworthy AI answers
+            "_citation_metadata": {
+                "type": "object",
+                "properties": {
+                    "has_low_confidence_fields": {"type": "boolean"},
+                    "low_confidence_field_names": {
+                        "type": "keyword",
+                        "ignore_above": 256
+                    },
+                    "audit_urls": {
+                        "type": "object",
+                        "enabled": False  # Dynamic field names (field_name -> url)
+                    }
+                }
+            },
+            # NEW: Confidence metrics for filtering/ranking
+            "_confidence_metrics": {
+                "type": "object",
+                "properties": {
+                    "min_confidence": {"type": "float"},
+                    "max_confidence": {"type": "float"},
+                    "avg_confidence": {"type": "float"},
+                    "field_count": {"type": "integer"},
+                    "verified_field_count": {"type": "integer"}
+                }
             }
         })
 
@@ -137,6 +169,103 @@ class ElasticsearchService:
             "boolean": "boolean"
         }
         return type_mapping.get(field_type, "text")
+
+    def _build_complex_field_mapping(self, field: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Build Elasticsearch mapping for complex field types (array, table, array_of_objects).
+
+        Args:
+            field: Field definition with type and schema information
+
+        Returns:
+            Elasticsearch mapping configuration
+        """
+        field_type = field.get("type")
+
+        if field_type == "array":
+            # Simple array (list of primitives)
+            item_type = field.get("item_type", "text")
+            es_item_type = self._get_es_field_type(item_type)
+
+            # Arrays in ES are handled automatically - just define the item type
+            mapping = {"type": es_item_type}
+
+            # Add keyword sub-field for text arrays
+            if es_item_type == "text":
+                mapping["fields"] = {
+                    "keyword": {
+                        "type": "keyword",
+                        "ignore_above": 256
+                    }
+                }
+
+            return mapping
+
+        elif field_type == "array_of_objects":
+            # Array of structured objects (e.g., invoice line items)
+            # Use "object" type for simple nested structures
+            object_schema = field.get("object_schema", {})
+            properties = {}
+
+            for obj_field_name, obj_field_def in object_schema.items():
+                obj_type = obj_field_def.get("type", "text")
+                es_type = self._get_es_field_type(obj_type)
+                properties[obj_field_name] = {"type": es_type}
+
+                # Add keyword sub-field for text fields
+                if es_type == "text":
+                    properties[obj_field_name]["fields"] = {
+                        "keyword": {"type": "keyword", "ignore_above": 256}
+                    }
+
+            return {
+                "type": "object",
+                "properties": properties
+            }
+
+        elif field_type == "table":
+            # Table with dynamic columns (e.g., grading specs)
+            # Use "nested" type for independent row queries
+            table_schema = field.get("table_schema", {})
+            row_identifier = table_schema.get("row_identifier", "id")
+            columns = table_schema.get("columns", [])
+            value_type = table_schema.get("value_type", "string")
+            dynamic_columns = table_schema.get("dynamic_columns", False)
+
+            # Build properties for known columns
+            properties = {
+                row_identifier: {"type": "keyword"}
+            }
+
+            es_value_type = self._get_es_field_type(value_type)
+            for col in columns:
+                properties[col] = {"type": es_value_type}
+
+            mapping = {
+                "type": "nested",
+                "properties": properties
+            }
+
+            # Enable dynamic templates for variable columns
+            if dynamic_columns:
+                column_pattern = table_schema.get("column_pattern", ".*")
+                mapping["dynamic"] = "true"
+                mapping["dynamic_templates"] = [
+                    {
+                        "dynamic_columns": {
+                            "match_pattern": "regex",
+                            "match": column_pattern,
+                            "mapping": {
+                                "type": es_value_type
+                            }
+                        }
+                    }
+                ]
+
+            return mapping
+
+        # Fallback for unknown types
+        return {"type": "text"}
 
     async def index_document(
         self,
@@ -209,7 +338,41 @@ class ElasticsearchService:
         # NEW: Field name index for discovery
         doc["_field_index"] = " ".join(field_names)
 
-        logger.info(f"Indexing document: {document_id} with enriched metadata")
+        # NEW: Calculate confidence metrics for filtering/ranking
+        if confidence_scores:
+            confidence_values = list(confidence_scores.values())
+            doc["_confidence_metrics"] = {
+                "min_confidence": min(confidence_values),
+                "max_confidence": max(confidence_values),
+                "avg_confidence": sum(confidence_values) / len(confidence_values),
+                "field_count": len(confidence_values),
+                "verified_field_count": 0  # Updated via update_document when verified
+            }
+        else:
+            doc["_confidence_metrics"] = {
+                "min_confidence": 1.0,
+                "max_confidence": 1.0,
+                "avg_confidence": 1.0,
+                "field_count": 0,
+                "verified_field_count": 0
+            }
+
+        # NEW: Build citation metadata for audit traceability
+        # This will be populated by audit_helpers when needed
+        # Using default threshold of 0.6 for low-confidence detection
+        audit_threshold = 0.6
+        low_confidence_fields = [
+            field_name for field_name, conf in confidence_scores.items()
+            if conf < audit_threshold
+        ]
+
+        doc["_citation_metadata"] = {
+            "has_low_confidence_fields": len(low_confidence_fields) > 0,
+            "low_confidence_field_names": low_confidence_fields,
+            "audit_urls": {}  # Populated by audit_helpers.prepare_citation_metadata()
+        }
+
+        logger.info(f"Indexing document: {document_id} with enriched metadata (confidence: avg={doc['_confidence_metrics']['avg_confidence']:.2f})")
         response = await self.client.index(
             index=self.index_name,
             id=str(document_id),
@@ -364,6 +527,7 @@ class ElasticsearchService:
                 {
                     "id": hit["_id"],
                     "score": hit["_score"],
+                    "filename": hit["_source"].get("filename"),  # Top-level for frontend
                     "data": hit["_source"],
                     "highlights": hit.get("highlight", {})
                 }
@@ -397,6 +561,18 @@ class ElasticsearchService:
             id=str(document_id),
             doc=updated_fields
         )
+
+    async def delete_document(self, elasticsearch_id: str) -> None:
+        """Delete a document from Elasticsearch by its ID"""
+        try:
+            logger.info(f"Deleting document from Elasticsearch: {elasticsearch_id}")
+            await self.client.delete(
+                index=self.index_name,
+                id=elasticsearch_id
+            )
+        except Exception as e:
+            logger.error(f"Failed to delete document {elasticsearch_id} from Elasticsearch: {e}")
+            raise
 
     async def get_aggregations(
         self,
@@ -897,6 +1073,151 @@ class ElasticsearchService:
         )
 
         return response["_id"]
+
+    async def cluster_uploaded_documents(
+        self,
+        documents: List[Any],  # List[Document]
+        similarity_threshold: float = 0.75
+    ) -> List[Dict[str, Any]]:
+        """
+        Cluster uploaded documents using More-Like-This for intra-batch similarity.
+
+        Algorithm:
+        1. Start with all docs as unclustered
+        2. Pick first doc as seed for cluster 1
+        3. Find similar docs using MLT (min similarity threshold)
+        4. Remove clustered docs from pool
+        5. Repeat until all docs clustered
+
+        Args:
+            documents: List of Document objects with reducto_parse_result
+            similarity_threshold: Minimum similarity score (0.0-1.0) to cluster together
+
+        Returns:
+            List of clusters:
+            [
+                {
+                    "representative_doc_id": int,
+                    "representative_filename": str,
+                    "document_ids": [int, ...],
+                    "filenames": [str, ...],
+                    "cluster_size": int,
+                    "avg_similarity": float
+                },
+                ...
+            ]
+        """
+
+        if not documents:
+            return []
+
+        # Extract document text and metadata
+        doc_data = []
+        for doc in documents:
+            # Use actual_parse_result property (supports both PhysicalFile and legacy)
+            parse_result = doc.actual_parse_result
+            if not parse_result:
+                logger.warning(f"Skipping document {doc.id} - no parse result")
+                continue
+
+            chunks = parse_result.get("chunks", [])
+            doc_text = "\n".join([c.get("content", "") for c in chunks[:10]])  # First 10 chunks
+
+            doc_data.append({
+                "id": doc.id,
+                "filename": doc.filename,
+                "text": doc_text[:5000]  # Limit to 5k chars for performance
+            })
+
+        if not doc_data:
+            logger.warning("No documents with parse results to cluster")
+            return []
+
+        clusters = []
+        unclustered_ids = {d["id"] for d in doc_data}
+        doc_lookup = {d["id"]: d for d in doc_data}
+
+        logger.info(f"Clustering {len(doc_data)} documents with threshold {similarity_threshold}")
+
+        # Iteratively build clusters
+        while unclustered_ids:
+            # Pick first unclustered doc as seed
+            seed_id = next(iter(unclustered_ids))
+            seed_doc = doc_lookup[seed_id]
+
+            cluster_doc_ids = [seed_id]
+            unclustered_ids.remove(seed_id)
+
+            # Find similar documents using text similarity
+            similar_ids = []
+            total_similarity = 0.0
+
+            for candidate_id in list(unclustered_ids):
+                candidate_doc = doc_lookup[candidate_id]
+
+                # Simple text similarity using common words (fast approximation)
+                # In production, could use ES MLT here, but this is faster for small batches
+                similarity = self._calculate_text_similarity(
+                    seed_doc["text"],
+                    candidate_doc["text"]
+                )
+
+                if similarity >= similarity_threshold:
+                    cluster_doc_ids.append(candidate_id)
+                    unclustered_ids.remove(candidate_id)
+                    total_similarity += similarity
+
+            # Calculate average similarity
+            avg_similarity = (total_similarity / len(cluster_doc_ids)) if len(cluster_doc_ids) > 1 else 1.0
+
+            clusters.append({
+                "representative_doc_id": seed_id,
+                "representative_filename": seed_doc["filename"],
+                "document_ids": cluster_doc_ids,
+                "filenames": [doc_lookup[doc_id]["filename"] for doc_id in cluster_doc_ids],
+                "cluster_size": len(cluster_doc_ids),
+                "avg_similarity": round(avg_similarity, 2)
+            })
+
+            logger.info(
+                f"Cluster {len(clusters)}: {len(cluster_doc_ids)} docs "
+                f"(seed: {seed_doc['filename']}, avg similarity: {avg_similarity:.2f})"
+            )
+
+        logger.info(f"Created {len(clusters)} clusters from {len(doc_data)} documents")
+        return clusters
+
+    def _calculate_text_similarity(self, text1: str, text2: str) -> float:
+        """
+        Calculate simple text similarity using Jaccard similarity on word sets.
+
+        Fast approximation for document clustering without ES query overhead.
+        For production scale, consider using ES MLT or embeddings.
+
+        Args:
+            text1: First text
+            text2: Second text
+
+        Returns:
+            Similarity score 0.0-1.0
+        """
+        # Tokenize and normalize
+        words1 = set(text1.lower().split())
+        words2 = set(text2.lower().split())
+
+        # Remove common stopwords (basic filter)
+        stopwords = {"the", "a", "an", "and", "or", "but", "in", "on", "at", "to", "for", "of", "with"}
+        words1 = {w for w in words1 if w not in stopwords and len(w) > 2}
+        words2 = {w for w in words2 if w not in stopwords and len(w) > 2}
+
+        if not words1 or not words2:
+            return 0.0
+
+        # Jaccard similarity: intersection / union
+        intersection = words1.intersection(words2)
+        union = words1.union(words2)
+
+        return len(intersection) / len(union)
 
     async def find_similar_templates(
         self,

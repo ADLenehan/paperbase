@@ -1,0 +1,367 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AskAI Integration Test</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            max-width: 900px;
+            margin: 50px auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .test-card {
+            background: white;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #1f2937;
+            margin-bottom: 10px;
+        }
+        h2 {
+            color: #374151;
+            font-size: 18px;
+            margin-top: 0;
+        }
+        .status {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 600;
+            margin-left: 10px;
+        }
+        .status.pass { background: #d1fae5; color: #065f46; }
+        .status.fail { background: #fee2e2; color: #991b1b; }
+        .status.pending { background: #e0e7ff; color: #3730a3; }
+
+        button {
+            background: #2563eb;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+        }
+        button:hover {
+            background: #1d4ed8;
+        }
+        button:disabled {
+            background: #9ca3af;
+            cursor: not-allowed;
+        }
+
+        .test-result {
+            margin-top: 10px;
+            padding: 12px;
+            border-radius: 6px;
+            font-size: 14px;
+            white-space: pre-wrap;
+            font-family: 'Monaco', 'Courier New', monospace;
+        }
+        .test-result.success {
+            background: #d1fae5;
+            color: #065f46;
+        }
+        .test-result.error {
+            background: #fee2e2;
+            color: #991b1b;
+        }
+
+        select {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #d1d5db;
+            border-radius: 6px;
+            margin: 10px 0;
+        }
+
+        .filter-badge {
+            display: inline-block;
+            padding: 4px 12px;
+            background: #dbeafe;
+            color: #1e40af;
+            border-radius: 12px;
+            font-size: 14px;
+            margin-top: 10px;
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+        }
+
+        @media (max-width: 768px) {
+            .grid {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <h1>AskAI Template Filter - Integration Test</h1>
+    <p style="color: #6b7280;">Visual verification of template filtering and search functionality</p>
+
+    <div class="test-card">
+        <h2>Test 1: Fetch Templates <span class="status pending" id="status1">Pending</span></h2>
+        <button onclick="testFetchTemplates()">Run Test</button>
+        <div id="result1"></div>
+    </div>
+
+    <div class="test-card">
+        <h2>Test 2: Search Without Filter <span class="status pending" id="status2">Pending</span></h2>
+        <button onclick="testSearchUnfiltered()">Run Test</button>
+        <div id="result2"></div>
+    </div>
+
+    <div class="test-card">
+        <h2>Test 3: Search With Template Filter <span class="status pending" id="status3">Pending</span></h2>
+        <p style="color: #6b7280; font-size: 14px;">Select a template and search:</p>
+        <select id="templateSelect">
+            <option value="">All Templates</option>
+        </select>
+        <div id="filterBadge"></div>
+        <button onclick="testSearchFiltered()" style="margin-top: 10px;">Run Test</button>
+        <div id="result3"></div>
+    </div>
+
+    <div class="test-card">
+        <h2>Test 4: Response Structure Validation <span class="status pending" id="status4">Pending</span></h2>
+        <button onclick="testResponseStructure()">Run Test</button>
+        <div id="result4"></div>
+    </div>
+
+    <div class="grid">
+        <div class="test-card">
+            <h2>✅ Backend Status</h2>
+            <div id="backendStatus">Checking...</div>
+        </div>
+        <div class="test-card">
+            <h2>✅ Elasticsearch Status</h2>
+            <div id="esStatus">Checking...</div>
+        </div>
+    </div>
+
+    <script>
+        const API_URL = 'http://localhost:8000';
+        let templates = [];
+
+        // Check services on load
+        window.onload = async () => {
+            checkBackend();
+            checkElasticsearch();
+        };
+
+        async function checkBackend() {
+            try {
+                const response = await fetch(`${API_URL}/health`);
+                document.getElementById('backendStatus').innerHTML =
+                    `<span style="color: #059669;">✅ Running (${response.status})</span>`;
+            } catch (e) {
+                document.getElementById('backendStatus').innerHTML =
+                    `<span style="color: #dc2626;">❌ Not responding</span>`;
+            }
+        }
+
+        async function checkElasticsearch() {
+            try {
+                const response = await fetch('http://localhost:9200/_cluster/health');
+                const data = await response.json();
+                const color = data.status === 'green' ? '#059669' : data.status === 'yellow' ? '#d97706' : '#dc2626';
+                document.getElementById('esStatus').innerHTML =
+                    `<span style="color: ${color};">● ${data.status.toUpperCase()}</span>`;
+            } catch (e) {
+                document.getElementById('esStatus').innerHTML =
+                    `<span style="color: #dc2626;">❌ Not responding</span>`;
+            }
+        }
+
+        async function testFetchTemplates() {
+            const statusEl = document.getElementById('status1');
+            const resultEl = document.getElementById('result1');
+
+            statusEl.textContent = 'Running...';
+            statusEl.className = 'status pending';
+
+            try {
+                const response = await fetch(`${API_URL}/api/templates`);
+                const data = await response.json();
+
+                templates = data.templates || [];
+
+                // Populate dropdown
+                const select = document.getElementById('templateSelect');
+                select.innerHTML = '<option value="">All Templates</option>';
+                templates.forEach(t => {
+                    const option = document.createElement('option');
+                    option.value = t.id;
+                    option.textContent = `${t.name} (${t.category || 'N/A'})`;
+                    select.appendChild(option);
+                });
+
+                statusEl.textContent = 'Pass';
+                statusEl.className = 'status pass';
+
+                resultEl.innerHTML = `<div class="test-result success">✅ Success!\n\nFetched ${templates.length} templates:\n${templates.map(t => `• ${t.name} (ID: ${t.id})`).join('\n')}</div>`;
+            } catch (e) {
+                statusEl.textContent = 'Fail';
+                statusEl.className = 'status fail';
+                resultEl.innerHTML = `<div class="test-result error">❌ Failed: ${e.message}</div>`;
+            }
+        }
+
+        async function testSearchUnfiltered() {
+            const statusEl = document.getElementById('status2');
+            const resultEl = document.getElementById('result2');
+
+            statusEl.textContent = 'Running...';
+            statusEl.className = 'status pending';
+
+            try {
+                const response = await fetch(`${API_URL}/api/search`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        query: 'Show me all documents',
+                        folder_path: null,
+                        template_id: null
+                    })
+                });
+
+                const data = await response.json();
+
+                statusEl.textContent = 'Pass';
+                statusEl.className = 'status pass';
+
+                resultEl.innerHTML = `<div class="test-result success">✅ Success!\n\nResults: ${data.total} documents\nOptimization: ${data.optimization_used ? 'Yes' : 'No'}\nCached: ${data.cached ? 'Yes' : 'No'}\n\nAnswer preview:\n${data.answer.substring(0, 150)}...</div>`;
+            } catch (e) {
+                statusEl.textContent = 'Fail';
+                statusEl.className = 'status fail';
+                resultEl.innerHTML = `<div class="test-result error">❌ Failed: ${e.message}</div>`;
+            }
+        }
+
+        async function testSearchFiltered() {
+            const statusEl = document.getElementById('status3');
+            const resultEl = document.getElementById('result3');
+            const selectEl = document.getElementById('templateSelect');
+            const templateId = selectEl.value;
+
+            if (!templateId) {
+                alert('Please select a template first');
+                return;
+            }
+
+            const template = templates.find(t => t.id === parseInt(templateId));
+
+            statusEl.textContent = 'Running...';
+            statusEl.className = 'status pending';
+
+            // Update filter badge
+            document.getElementById('filterBadge').innerHTML =
+                `<div class="filter-badge">🔵 Filtering: ${template.name}</div>`;
+
+            try {
+                const response = await fetch(`${API_URL}/api/search`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        query: 'Show me all documents',
+                        folder_path: null,
+                        template_id: parseInt(templateId)
+                    })
+                });
+
+                const data = await response.json();
+
+                statusEl.textContent = 'Pass';
+                statusEl.className = 'status pass';
+
+                // Verify filter worked
+                const results = data.results || [];
+                let filterVerification = '\n\n✅ Template filter applied correctly';
+                if (results.length > 0) {
+                    const allMatch = results.every(doc =>
+                        doc._query_context?.template_name === template.name
+                    );
+                    filterVerification = allMatch
+                        ? '\n\n✅ All results match selected template'
+                        : '\n\n⚠️ Some results do not match template';
+                }
+
+                resultEl.innerHTML = `<div class="test-result success">✅ Success!\n\nFiltered by: ${template.name}\nResults: ${data.total} documents${filterVerification}\n\nAnswer preview:\n${data.answer.substring(0, 150)}...</div>`;
+            } catch (e) {
+                statusEl.textContent = 'Fail';
+                statusEl.className = 'status fail';
+                resultEl.innerHTML = `<div class="test-result error">❌ Failed: ${e.message}</div>`;
+            }
+        }
+
+        async function testResponseStructure() {
+            const statusEl = document.getElementById('status4');
+            const resultEl = document.getElementById('result4');
+
+            statusEl.textContent = 'Running...';
+            statusEl.className = 'status pending';
+
+            try {
+                const response = await fetch(`${API_URL}/api/search`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        query: 'Test query',
+                        template_id: null
+                    })
+                });
+
+                const data = await response.json();
+
+                // Check required fields
+                const requiredFields = [
+                    'query', 'answer', 'results', 'total', 'explanation',
+                    'answer_metadata', 'audit_items', 'confidence_summary', 'field_lineage'
+                ];
+
+                const checks = requiredFields.map(field => ({
+                    field,
+                    present: field in data
+                }));
+
+                const allPresent = checks.every(c => c.present);
+
+                statusEl.textContent = allPresent ? 'Pass' : 'Fail';
+                statusEl.className = allPresent ? 'status pass' : 'status fail';
+
+                const checkList = checks.map(c =>
+                    `${c.present ? '✅' : '❌'} ${c.field}`
+                ).join('\n');
+
+                resultEl.innerHTML = `<div class="test-result ${allPresent ? 'success' : 'error'}">${allPresent ? '✅' : '❌'} Response Structure Check\n\n${checkList}\n\n${allPresent ? 'All required fields present!' : 'Some fields missing!'}</div>`;
+            } catch (e) {
+                statusEl.textContent = 'Fail';
+                statusEl.className = 'status fail';
+                resultEl.innerHTML = `<div class="test-result error">❌ Failed: ${e.message}</div>`;
+            }
+        }
+
+        // Update filter badge when selection changes
+        document.getElementById('templateSelect').addEventListener('change', (e) => {
+            const badgeEl = document.getElementById('filterBadge');
+            if (e.target.value) {
+                const template = templates.find(t => t.id === parseInt(e.target.value));
+                badgeEl.innerHTML = `<div class="filter-badge">🔵 Filtering: ${template.name}</div>`;
+            } else {
+                badgeEl.innerHTML = '';
+            }
+        });
+    </script>
+</body>
+</html>

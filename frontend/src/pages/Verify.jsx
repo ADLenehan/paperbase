@@ -235,7 +235,7 @@ function Verify() {
               <button
                 onClick={() => handleVerify('confirm')}
                 disabled={verifying}
-                className="w-full bg-green-600 text-white py-3 px-4 rounded-lg font-medium hover:bg-green-700 transition-colors disabled:opacity-50"
+                className="w-full bg-periwinkle-600 text-white py-3 px-4 rounded-lg font-medium hover:bg-periwinkle-700 transition-colors disabled:opacity-50"
               >
                 ✓ Correct (Confirm)
               </button>
@@ -247,12 +247,12 @@ function Verify() {
                   value={customValue}
                   onChange={(e) => setCustomValue(e.target.value)}
                   placeholder="Enter correct value..."
-                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-periwinkle-500 focus:border-transparent"
                 />
                 <button
                   onClick={() => handleVerify('correct')}
                   disabled={verifying || !customValue}
-                  className="w-full bg-blue-600 text-white py-3 px-4 rounded-lg font-medium hover:bg-blue-700 transition-colors disabled:opacity-50"
+                  className="w-full bg-periwinkle-600 text-white py-3 px-4 rounded-lg font-medium hover:bg-periwinkle-700 transition-colors disabled:opacity-50"
                 >
                   Submit Correction
                 </button>
@@ -262,7 +262,7 @@ function Verify() {
               <button
                 onClick={() => handleVerify('not_found')}
                 disabled={verifying}
-                className="w-full bg-yellow-600 text-white py-3 px-4 rounded-lg font-medium hover:bg-yellow-700 transition-colors disabled:opacity-50"
+                className="w-full bg-coral-600 text-white py-3 px-4 rounded-lg font-medium hover:bg-coral-700 transition-colors disabled:opacity-50"
               >
                 Not Found in Document
               </button>

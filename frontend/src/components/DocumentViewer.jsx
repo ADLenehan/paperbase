@@ -32,6 +32,7 @@ export default function DocumentViewer({
 }) {
   const [numPages, setNumPages] = useState(null);
   const [pageWidth, setPageWidth] = useState(600);
+  const [pageHeight, setPageHeight] = useState(800); // Add page height for bbox scaling
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [fileType, setFileType] = useState(null);
@@ -198,6 +199,12 @@ export default function DocumentViewer({
               <Page
                 pageNumber={page}
                 width={pageWidth * zoom}
+                onLoadSuccess={(pageData) => {
+                  // Capture actual page dimensions for bbox scaling
+                  const viewport = pageData.getViewport({ scale: 1 });
+                  setPageWidth(viewport.width);
+                  setPageHeight(viewport.height);
+                }}
                 renderTextLayer={true}
                 renderAnnotationLayer={true}
               />
@@ -222,6 +229,7 @@ export default function DocumentViewer({
             <BBoxOverlays
               highlights={highlights}
               pageWidth={pageWidth * zoom}
+              pageHeight={pageHeight * zoom}
               currentPage={page}
               zoom={zoom}
             />
@@ -235,7 +243,7 @@ export default function DocumentViewer({
 /**
  * BBoxOverlays component - renders bounding boxes over document
  */
-function BBoxOverlays({ highlights, pageWidth, currentPage, zoom = 1.0 }) {
+function BBoxOverlays({ highlights, pageWidth, pageHeight, currentPage, zoom = 1.0 }) {
   return (
     <div className="absolute top-0 left-0 pointer-events-none">
       {highlights
@@ -244,26 +252,34 @@ function BBoxOverlays({ highlights, pageWidth, currentPage, zoom = 1.0 }) {
           if (!highlight.bbox) return null;
 
           // Handle both object format {left, top, width, height} and array format [x, y, w, h]
+          // Bbox coordinates from Reducto are NORMALIZED [0-1], need to scale by page dimensions
           let x, y, width, height;
           if (Array.isArray(highlight.bbox)) {
-            // Array format: [x, y, width, height]
+            // Array format: [x, y, width, height] - all normalized [0-1]
             if (highlight.bbox.length < 4) return null;
             [x, y, width, height] = highlight.bbox;
           } else {
-            // Object format: {left, top, width, height}
+            // Object format: {left, top, width, height} - all normalized [0-1]
             x = highlight.bbox.left || 0;
             y = highlight.bbox.top || 0;
             width = highlight.bbox.width || 0;
             height = highlight.bbox.height || 0;
           }
 
+          // Scale normalized coordinates [0-1] to pixel coordinates
+          // pageWidth and pageHeight already include zoom
+          const pixelX = x * pageWidth;
+          const pixelY = y * pageHeight;
+          const pixelWidth = width * pageWidth;
+          const pixelHeight = height * pageHeight;
+
           // Color mapping based on confidence or explicit color
-          // Using consistent colors from DocumentsDashboard
+          // Using consistent colors from DocumentsDashboard status badges
           const colorMap = {
-            red: 'border-red-500 bg-red-500',
-            yellow: 'border-yellow-500 bg-yellow-500',
-            green: 'border-green-500 bg-green-500',
-            blue: 'border-blue-600 bg-blue-600'
+            red: 'border-red-500 bg-red-500',           // Error / Low confidence
+            yellow: 'border-yellow-500 bg-yellow-500',   // Uploaded / Medium confidence
+            green: 'border-periwinkle-600 bg-periwinkle-600', // Completed / High confidence
+            blue: 'border-periwinkle-600 bg-periwinkle-600'   // Completed / High confidence
           };
 
           const colorClass = colorMap[highlight.color] || 'border-red-500 bg-red-500';
@@ -273,10 +289,10 @@ function BBoxOverlays({ highlights, pageWidth, currentPage, zoom = 1.0 }) {
               key={index}
               className={`absolute border-[3px] ${colorClass} bg-opacity-20 pointer-events-auto cursor-pointer transition-all hover:bg-opacity-30 hover:shadow-lg`}
               style={{
-                left: `${x * zoom}px`,
-                top: `${y * zoom}px`,
-                width: `${width * zoom}px`,
-                height: `${height * zoom}px`
+                left: `${pixelX}px`,
+                top: `${pixelY}px`,
+                width: `${pixelWidth}px`,
+                height: `${pixelHeight}px`
               }}
               title={highlight.label || 'Extraction'}
             >

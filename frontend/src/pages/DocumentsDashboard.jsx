@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import FieldEditor from '../components/FieldEditor';
+import ExportModal from '../components/ExportModal';
 import apiClient from '../api/client';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
@@ -15,6 +16,30 @@ export default function DocumentsDashboard() {
   const [templateMap, setTemplateMap] = useState({});
   const [selectedTemplate, setSelectedTemplate] = useState(null);
   const [showFieldEditor, setShowFieldEditor] = useState(false);
+  const [showCreateTemplatePrompt, setShowCreateTemplatePrompt] = useState(false);
+  const [newTemplateName, setNewTemplateName] = useState('');
+  const [creatingTemplate, setCreatingTemplate] = useState(false);
+  const [showFieldPreview, setShowFieldPreview] = useState(false);
+  const [previewFields, setPreviewFields] = useState(null);
+  const [pendingTemplateName, setPendingTemplateName] = useState('');
+
+  // Export functionality
+  const [selectedDocIds, setSelectedDocIds] = useState([]);
+  const [showExportModal, setShowExportModal] = useState(false);
+
+  // Track documents being processed (for retry polling)
+  const [processingDocs, setProcessingDocs] = useState(new Set());
+
+  // Delete confirmation modal
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [documentToDelete, setDocumentToDelete] = useState(null);
+  const [deleteError, setDeleteError] = useState(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+
+  // NEW: Query history support
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [queryContext, setQueryContext] = useState(null);
+
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -25,6 +50,43 @@ export default function DocumentsDashboard() {
     const interval = setInterval(fetchDocuments, 5000);
     return () => clearInterval(interval);
   }, []);
+
+  // Poll for status updates on documents being processed
+  useEffect(() => {
+    if (processingDocs.size === 0) return;
+
+    const pollInterval = setInterval(async () => {
+      for (const docId of processingDocs) {
+        try {
+          const response = await fetch(`${API_URL}/api/documents/${docId}`);
+          if (!response.ok) continue;
+
+          const updatedDoc = await response.json();
+
+          // Check if processing is complete
+          const isDone = ['completed', 'verified', 'error'].includes(updatedDoc.status);
+
+          if (isDone) {
+            // Remove from processing set
+            setProcessingDocs(prev => {
+              const newSet = new Set(prev);
+              newSet.delete(docId);
+              return newSet;
+            });
+          }
+
+          // Update document in list
+          setDocuments(prevDocs =>
+            prevDocs.map(doc => doc.id === docId ? updatedDoc : doc)
+          );
+        } catch (err) {
+          console.error(`Failed to poll status for document ${docId}:`, err);
+        }
+      }
+    }, 3000); // Poll every 3 seconds
+
+    return () => clearInterval(pollInterval);
+  }, [processingDocs]);
 
   const fetchTemplates = async () => {
     try {
@@ -45,11 +107,19 @@ export default function DocumentsDashboard() {
 
   const fetchDocuments = async () => {
     try {
-      console.log('Fetching documents from:', `${API_URL}/api/documents`);
+      // NEW: Check for query_id in URL params
+      const queryId = searchParams.get('query_id');
+
+      // Build URL with optional query_id parameter
+      const documentsUrl = queryId
+        ? `${API_URL}/api/documents?query_id=${encodeURIComponent(queryId)}`
+        : `${API_URL}/api/documents`;
+
+      console.log('Fetching documents from:', documentsUrl);
 
       // Fetch both legacy documents and new extractions
       const [docsResponse, extractionsResponse] = await Promise.all([
-        fetch(`${API_URL}/api/documents`).catch((err) => {
+        fetch(documentsUrl).catch((err) => {
           console.error('Docs fetch error:', err);
           return { ok: false };
         }),
@@ -66,6 +136,15 @@ export default function DocumentsDashboard() {
         const docsData = await docsResponse.json();
         console.log('Fetched documents:', docsData);
         allDocuments = docsData.documents || [];
+
+        // NEW: Store query context if present
+        if (docsData.query_context) {
+          setQueryContext(docsData.query_context);
+          console.log('Query context:', docsData.query_context);
+        } else {
+          setQueryContext(null);
+        }
+
         console.log('Total documents:', allDocuments.length);
       } else {
         console.error('Documents response not OK:', docsResponse.status, docsResponse.statusText);
@@ -242,16 +321,204 @@ export default function DocumentsDashboard() {
     }
   };
 
+  const handleCreateNewTemplate = async () => {
+    if (!newTemplateName.trim()) {
+      alert('Please enter a template name');
+      return;
+    }
+
+    setCreatingTemplate(true);
+    try {
+      // Step 1: Generate AI-suggested fields WITHOUT creating template
+      const response = await fetch(`${API_URL}/api/bulk/generate-schema`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          document_ids: [selectedDocument.id],
+          template_name: newTemplateName.trim()
+        })
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.detail || 'Schema generation failed');
+      }
+
+      // Step 2: Show field preview modal for user to review/edit
+      setPendingTemplateName(newTemplateName.trim());
+      setPreviewFields(data.suggested_fields || []);
+      setShowFieldPreview(true);
+      setShowCreateTemplatePrompt(false);
+      setCreatingTemplate(false);
+    } catch (err) {
+      console.error('Failed to generate schema:', err);
+      alert(`Failed to generate schema: ${err.message}`);
+      setCreatingTemplate(false);
+    }
+  };
+
+  const handleFinalizeTemplate = async (finalFields) => {
+    setCreatingTemplate(true);
+    try {
+      // Create template with user-confirmed fields
+      const response = await fetch(`${API_URL}/api/bulk/create-new-template`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          document_ids: [selectedDocument.id],
+          template_name: pendingTemplateName,
+          fields: finalFields
+        })
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.detail || 'Failed to create template');
+      }
+
+      // Close modals and refresh
+      setShowFieldPreview(false);
+      setShowTemplateModal(false);
+      setPreviewFields(null);
+      setPendingTemplateName('');
+      setNewTemplateName('');
+      fetchDocuments();
+      fetchTemplates();
+
+      alert(`Template "${pendingTemplateName}" created successfully! Document is now processing.`);
+    } catch (err) {
+      console.error('Failed to create template:', err);
+      alert(`Failed to create template: ${err.message}`);
+    } finally {
+      setCreatingTemplate(false);
+    }
+  };
+
+  const handleCancelFieldPreview = () => {
+    setShowFieldPreview(false);
+    setPreviewFields(null);
+    setPendingTemplateName('');
+    setShowCreateTemplatePrompt(true); // Go back to name input
+  };
+
   const handleCloseModal = () => {
     setShowTemplateModal(false);
     setShowFieldEditor(false);
+    setShowCreateTemplatePrompt(false);
     setSelectedDocument(null);
     setSelectedTemplate(null);
+    setNewTemplateName('');
+  };
+
+  // Export handlers
+  const handleToggleSelectAll = () => {
+    // Get exportable docs (completed or verified)
+    const exportableDocs = filteredDocs.filter(canExportDoc);
+    const exportableIds = exportableDocs.map(doc => doc.id);
+
+    if (selectedDocIds.length === exportableIds.length && exportableIds.length > 0) {
+      // Deselect all
+      setSelectedDocIds([]);
+    } else {
+      // Select all exportable filtered docs
+      setSelectedDocIds(exportableIds);
+    }
+  };
+
+  const handleToggleDoc = (docId) => {
+    if (selectedDocIds.includes(docId)) {
+      setSelectedDocIds(selectedDocIds.filter(id => id !== docId));
+    } else {
+      setSelectedDocIds([...selectedDocIds, docId]);
+    }
+  };
+
+  // Check if a document can be exported
+  const canExportDoc = (doc) => {
+    // Only allow export for completed or verified documents
+    return doc.status === 'completed' || doc.status === 'verified';
+  };
+
+  const handleOpenExport = () => {
+    if (selectedDocIds.length === 0) {
+      alert('Please select at least one document to export');
+      return;
+    }
+    setShowExportModal(true);
+  };
+
+  const handleCloseExport = () => {
+    setShowExportModal(false);
+  };
+
+  const handleRowClick = (doc) => {
+    // Navigate to document detail page for completed/verified documents
+    if (doc.status === 'completed' || doc.status === 'verified') {
+      navigate(`/documents/${doc.id}`);
+    }
+  };
+
+  const handleDeleteDocument = (doc) => {
+    setDocumentToDelete(doc);
+    setDeleteError(null);
+    setShowDeleteModal(true);
+  };
+
+  const confirmDelete = async () => {
+    if (!documentToDelete) return;
+
+    setIsDeleting(true);
+    setDeleteError(null);
+
+    try {
+      const response = await fetch(`${API_URL}/api/documents/${documentToDelete.id}`, {
+        method: 'DELETE'
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.detail || 'Failed to delete document');
+      }
+
+      // Remove from selection if selected
+      setSelectedDocIds(selectedDocIds.filter(id => id !== documentToDelete.id));
+
+      // Close modal and refresh
+      setShowDeleteModal(false);
+      setDocumentToDelete(null);
+      fetchDocuments();
+    } catch (err) {
+      console.error('Failed to delete document:', err);
+      setDeleteError(err.message);
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
+  const cancelDelete = () => {
+    setShowDeleteModal(false);
+    setDocumentToDelete(null);
+    setDeleteError(null);
+  };
+
+  // NEW: Clear query filter
+  const handleClearQueryFilter = () => {
+    // Remove query_id from URL params
+    searchParams.delete('query_id');
+    setSearchParams(searchParams);
+    setQueryContext(null);
   };
 
   const getFilteredDocuments = () => {
     if (filter === 'all') return documents;
     return documents.filter(doc => doc.status === filter);
+  };
+
+  const getLowConfidenceCount = (doc) => {
+    if (!doc.extracted_fields || !Array.isArray(doc.extracted_fields)) return 0;
+    return doc.extracted_fields.filter(f => f.confidence_score && f.confidence_score < 0.6).length;
   };
 
   const statusCounts = documents.reduce((acc, doc) => {
@@ -276,6 +543,58 @@ export default function DocumentsDashboard() {
         <p className="text-gray-600">View and manage all uploaded documents</p>
       </div>
 
+      {/* NEW: Query Context Banner */}
+      {queryContext && (
+        <div className="mb-6 bg-blue-50 border-l-4 border-blue-400 rounded-r-lg shadow-sm">
+          <div className="p-4">
+            <div className="flex items-start justify-between">
+              <div className="flex-1">
+                <div className="flex items-center gap-2 mb-2">
+                  <svg className="w-5 h-5 text-blue-600 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                  </svg>
+                  <h3 className="text-sm font-semibold text-blue-900">
+                    Showing documents used in query
+                  </h3>
+                </div>
+                <p className="text-sm text-blue-800 mb-2 pl-7">
+                  "{queryContext.query_text}"
+                </p>
+                <div className="flex items-center gap-4 text-xs text-blue-700 pl-7">
+                  <span className="flex items-center gap-1">
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                    </svg>
+                    {queryContext.document_count} {queryContext.document_count === 1 ? 'document' : 'documents'}
+                  </span>
+                  <span className="flex items-center gap-1">
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    {new Date(queryContext.created_at).toLocaleString()}
+                  </span>
+                  <span className="flex items-center gap-1">
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z" />
+                    </svg>
+                    {queryContext.source === 'ask_ai' ? 'Ask AI' : 'MCP'}
+                  </span>
+                </div>
+              </div>
+              <button
+                onClick={handleClearQueryFilter}
+                className="ml-4 px-3 py-1.5 text-sm font-medium text-blue-700 hover:text-blue-900 hover:bg-blue-100 rounded-lg transition-colors flex items-center gap-1.5"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+                Clear Filter
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Stats */}
       <div className="grid grid-cols-5 gap-4 mb-6">
         <StatCard label="Total" value={documents.length} active={filter === 'all'} onClick={() => setFilter('all')} />
@@ -285,26 +604,48 @@ export default function DocumentsDashboard() {
         <StatCard label="Completed" value={(statusCounts.completed || 0) + (statusCounts.verified || 0)} active={filter === 'completed'} onClick={() => setFilter('completed')} />
       </div>
 
-      {/* Filter Bar */}
+      {/* Filter Bar with Export Button */}
       <div className="bg-white rounded-lg border p-4 mb-6">
-        <div className="flex items-center gap-2">
-          <span className="text-sm font-medium text-gray-700">Filter:</span>
-          <select
-            value={filter}
-            onChange={(e) => setFilter(e.target.value)}
-            className="px-3 py-1 border border-gray-300 rounded-lg text-sm"
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <span className="text-sm font-medium text-gray-700">Filter:</span>
+            <select
+              value={filter}
+              onChange={(e) => setFilter(e.target.value)}
+              className="px-3 py-1 border border-gray-300 rounded-lg text-sm"
+            >
+              <option value="all">All Documents</option>
+              <option value="uploaded">Uploaded</option>
+              <option value="analyzing">Analyzing</option>
+              <option value="template_matched">Template Matched</option>
+              <option value="template_needed">Needs Template</option>
+              <option value="ready_to_process">Ready to Process</option>
+              <option value="processing">Processing</option>
+              <option value="completed">Completed</option>
+              <option value="verified">Verified</option>
+              <option value="error">Error</option>
+            </select>
+          </div>
+
+          {/* Export Button - Always visible, disabled when no selection */}
+          <button
+            onClick={handleOpenExport}
+            disabled={selectedDocIds.length === 0}
+            className={`inline-flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg transition-colors ${
+              selectedDocIds.length > 0
+                ? 'text-white bg-blue-600 hover:bg-blue-700'
+                : 'text-gray-400 bg-gray-100 cursor-not-allowed'
+            }`}
+            title={selectedDocIds.length === 0 ? 'Select completed documents to export' : `Export ${selectedDocIds.length} document${selectedDocIds.length !== 1 ? 's' : ''}`}
           >
-            <option value="all">All Documents</option>
-            <option value="uploaded">Uploaded</option>
-            <option value="analyzing">Analyzing</option>
-            <option value="template_matched">Template Matched</option>
-            <option value="template_needed">Needs Template</option>
-            <option value="ready_to_process">Ready to Process</option>
-            <option value="processing">Processing</option>
-            <option value="completed">Completed</option>
-            <option value="verified">Verified</option>
-            <option value="error">Error</option>
-          </select>
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+            </svg>
+            {selectedDocIds.length > 0
+              ? `Export ${selectedDocIds.length} document${selectedDocIds.length !== 1 ? 's' : ''}`
+              : 'Export'
+            }
+          </button>
         </div>
       </div>
 
@@ -313,6 +654,19 @@ export default function DocumentsDashboard() {
         <table className="min-w-full divide-y divide-gray-200">
           <thead className="bg-gray-50">
             <tr>
+              <th className="px-4 py-3 w-12">
+                <input
+                  type="checkbox"
+                  checked={
+                    filteredDocs.filter(canExportDoc).length > 0 &&
+                    selectedDocIds.length === filteredDocs.filter(canExportDoc).length
+                  }
+                  onChange={handleToggleSelectAll}
+                  disabled={filteredDocs.filter(canExportDoc).length === 0}
+                  className="rounded border-gray-300 text-blue-600 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                  title="Select all exportable documents"
+                />
+              </th>
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Filename</th>
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
               <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Template</th>
@@ -323,18 +677,57 @@ export default function DocumentsDashboard() {
           <tbody className="bg-white divide-y divide-gray-200">
             {filteredDocs.length === 0 ? (
               <tr>
-                <td colSpan="5" className="px-6 py-12 text-center text-gray-500">
+                <td colSpan="6" className="px-6 py-12 text-center text-gray-500">
                   No documents found
                 </td>
               </tr>
             ) : (
               filteredDocs.map(doc => (
-                <tr key={doc.id} className="hover:bg-gray-50">
+                <tr
+                  key={doc.id}
+                  className={`hover:bg-gray-50 ${
+                    (doc.status === 'completed' || doc.status === 'verified') ? 'cursor-pointer' : ''
+                  }`}
+                  onClick={(e) => {
+                    // Don't trigger row click if clicking on checkbox or action buttons
+                    if (e.target.tagName === 'INPUT' || e.target.closest('button')) {
+                      return;
+                    }
+                    handleRowClick(doc);
+                  }}
+                >
+                  <td className="px-4 py-4">
+                    <input
+                      type="checkbox"
+                      checked={selectedDocIds.includes(doc.id)}
+                      onChange={() => handleToggleDoc(doc.id)}
+                      disabled={!canExportDoc(doc)}
+                      className="rounded border-gray-300 text-blue-600 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                      title={!canExportDoc(doc) ? 'Only completed or verified documents can be exported' : 'Select for export'}
+                    />
+                  </td>
                   <td className="px-6 py-4 text-sm font-medium text-gray-900">
-                    {doc.filename}
+                    <div className="flex items-center gap-2">
+                      <span>{doc.filename}</span>
+                      {(doc.status === 'completed' || doc.status === 'verified') && getLowConfidenceCount(doc) > 0 && (
+                        <span
+                          className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800"
+                          title={`${getLowConfidenceCount(doc)} fields need review`}
+                        >
+                          ⚠ {getLowConfidenceCount(doc)}
+                        </span>
+                      )}
+                    </div>
                   </td>
                   <td className="px-6 py-4 text-sm">
-                    {getStatusBadge(doc.status, doc.template_confidence, doc.lowest_confidence_field)}
+                    <div className="space-y-1">
+                      {getStatusBadge(doc.status, doc.template_confidence, doc.lowest_confidence_field)}
+                      {doc.status === 'error' && doc.error_message && (
+                        <div className="text-xs text-red-600 max-w-xs" title={doc.error_message}>
+                          {doc.error_message.length > 60 ? doc.error_message.slice(0, 60) + '...' : doc.error_message}
+                        </div>
+                      )}
+                    </div>
                   </td>
                   <td className="px-6 py-4 text-sm">
                     {doc.schema?.name ? (
@@ -355,6 +748,10 @@ export default function DocumentsDashboard() {
                       doc={doc}
                       navigate={navigate}
                       onAssignTemplate={handleAssignTemplate}
+                      processingDocs={processingDocs}
+                      setProcessingDocs={setProcessingDocs}
+                      onViewDetails={handleRowClick}
+                      onDeleteDocument={handleDeleteDocument}
                     />
                   </td>
                 </tr>
@@ -382,7 +779,14 @@ export default function DocumentsDashboard() {
                     <label className="text-sm font-medium text-gray-700">Template:</label>
                     <select
                       value={selectedTemplate?.id || ''}
-                      onChange={(e) => handleSelectTemplate(parseInt(e.target.value))}
+                      onChange={(e) => {
+                        const value = e.target.value;
+                        if (value === 'create_new') {
+                          setShowCreateTemplatePrompt(true);
+                        } else {
+                          handleSelectTemplate(parseInt(value));
+                        }
+                      }}
                       className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                     >
                       <option value="">Select a template...</option>
@@ -391,6 +795,9 @@ export default function DocumentsDashboard() {
                           {template.icon} {template.name} ({template.field_count} fields)
                         </option>
                       ))}
+                      <option value="create_new" className="text-blue-600 font-medium">
+                        ➕ Create New Template
+                      </option>
                     </select>
 
                     {selectedDocument?.template_confidence && (
@@ -408,8 +815,57 @@ export default function DocumentsDashboard() {
                 </button>
               </div>
 
-              {/* Field Editor */}
-              {selectedTemplate ? (
+              {/* Create Template Prompt */}
+              {showCreateTemplatePrompt ? (
+                <div className="py-8">
+                  <div className="max-w-md mx-auto">
+                    <div className="mb-6 text-center">
+                      <div className="text-4xl mb-3">➕</div>
+                      <h3 className="text-lg font-semibold text-gray-900 mb-2">Create New Template</h3>
+                      <p className="text-sm text-gray-600">
+                        Claude will analyze this document and generate a schema automatically
+                      </p>
+                    </div>
+
+                    <div className="space-y-4">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          Template Name
+                        </label>
+                        <input
+                          type="text"
+                          value={newTemplateName}
+                          onChange={(e) => setNewTemplateName(e.target.value)}
+                          placeholder="e.g., Garment Tech Spec, Medical Records, etc."
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                          onKeyPress={(e) => {
+                            if (e.key === 'Enter' && !creatingTemplate) {
+                              handleCreateNewTemplate();
+                            }
+                          }}
+                        />
+                      </div>
+
+                      <div className="flex gap-3">
+                        <button
+                          onClick={() => setShowCreateTemplatePrompt(false)}
+                          className="flex-1 px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50"
+                          disabled={creatingTemplate}
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          onClick={handleCreateNewTemplate}
+                          disabled={creatingTemplate || !newTemplateName.trim()}
+                          className="flex-1 px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed"
+                        >
+                          {creatingTemplate ? 'Creating...' : 'Create Template'}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ) : selectedTemplate ? (
                 <FieldEditor
                   initialFields={selectedTemplate.fields || []}
                   templateName={selectedTemplate.name || ''}
@@ -422,6 +878,111 @@ export default function DocumentsDashboard() {
                   Please select a template to continue
                 </div>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* NEW: Field Preview Modal - Review AI-suggested fields before creating template */}
+      {showFieldPreview && previewFields && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg shadow-xl w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col">
+            {/* Header */}
+            <div className="px-6 py-4 border-b border-gray-200 bg-gray-50">
+              <h2 className="text-xl font-semibold text-gray-900">
+                Review Template Fields
+              </h2>
+              <p className="text-sm text-gray-600 mt-1">
+                AI-suggested fields for "<strong>{pendingTemplateName}</strong>". Review and edit before creating the template.
+              </p>
+            </div>
+
+            {/* Field Editor */}
+            <div className="flex-1 overflow-y-auto p-6">
+              <FieldEditor
+                templateId={null}
+                templateName={pendingTemplateName}
+                initialFields={previewFields}
+                onSave={handleFinalizeTemplate}
+                onCancel={handleCancelFieldPreview}
+                isNewTemplate={true}
+              />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Export Modal */}
+      <ExportModal
+        isOpen={showExportModal}
+        onClose={handleCloseExport}
+        documentIds={selectedDocIds}
+      />
+
+      {/* Delete Confirmation Modal */}
+      {showDeleteModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg max-w-md w-full p-6 shadow-xl">
+            {/* Header */}
+            <div className="flex items-start mb-4">
+              <div className="flex-shrink-0 w-10 h-10 rounded-full bg-red-100 flex items-center justify-center">
+                <svg className="w-6 h-6 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                </svg>
+              </div>
+              <div className="ml-4 flex-1">
+                <h3 className="text-lg font-semibold text-gray-900">Delete Document</h3>
+                <p className="mt-1 text-sm text-gray-600">
+                  Are you sure you want to delete <span className="font-medium text-gray-900">"{documentToDelete?.filename}"</span>? This action cannot be undone.
+                </p>
+              </div>
+            </div>
+
+            {/* Error Message */}
+            {deleteError && (
+              <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg">
+                <div className="flex items-start">
+                  <svg className="w-5 h-5 text-red-600 mt-0.5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                    <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
+                  </svg>
+                  <div className="ml-2 text-sm text-red-700">
+                    {deleteError}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Actions */}
+            <div className="flex gap-3 justify-end">
+              <button
+                onClick={cancelDelete}
+                disabled={isDeleting}
+                className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmDelete}
+                disabled={isDeleting}
+                className="px-4 py-2 text-sm font-medium text-white bg-red-600 rounded-lg hover:bg-red-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+              >
+                {isDeleting ? (
+                  <>
+                    <svg className="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                    Deleting...
+                  </>
+                ) : (
+                  <>
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                    </svg>
+                    Delete Document
+                  </>
+                )}
+              </button>
             </div>
           </div>
         </div>
@@ -446,8 +1007,13 @@ function StatCard({ label, value, active, onClick }) {
   );
 }
 
-function DocumentActions({ doc, navigate, onAssignTemplate }) {
+function DocumentActions({ doc, navigate, onAssignTemplate, processingDocs, setProcessingDocs, onViewDetails, onDeleteDocument }) {
   const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+  const [isRetrying, setIsRetrying] = useState(false);
+  const [showDropdown, setShowDropdown] = useState(false);
+
+  // Check if this document is currently being processed
+  const isProcessing = processingDocs.has(doc.id);
 
   const handleExtractData = async () => {
     try {
@@ -464,12 +1030,8 @@ function DocumentActions({ doc, navigate, onAssignTemplate }) {
         throw new Error(errorData.detail || 'Failed to start extraction');
       }
 
-      alert('Extraction started - the document will be processed in the background. This page will refresh automatically to show progress.');
-
-      // Wait a moment for status to update, then reload
-      setTimeout(() => {
-        window.location.reload();
-      }, 1500);
+      // Add to processing set for polling
+      setProcessingDocs(prev => new Set(prev).add(doc.id));
     } catch (err) {
       console.error('Failed to start extraction:', err);
       alert(`Failed to start extraction: ${err.message}`);
@@ -477,6 +1039,7 @@ function DocumentActions({ doc, navigate, onAssignTemplate }) {
   };
 
   const handleRetry = async () => {
+    setIsRetrying(true);
     try {
       const response = await fetch(`${API_URL}/api/documents/process`, {
         method: 'POST',
@@ -491,16 +1054,18 @@ function DocumentActions({ doc, navigate, onAssignTemplate }) {
         throw new Error(errorData.detail || 'Failed to retry processing');
       }
 
-      alert('Processing started');
-      window.location.reload();
+      // Add to processing set for polling (no page reload!)
+      setProcessingDocs(prev => new Set(prev).add(doc.id));
+      setIsRetrying(false);
     } catch (err) {
       console.error('Failed to retry processing:', err);
       alert(`Failed to retry processing: ${err.message}`);
+      setIsRetrying(false);
     }
   };
 
   const handleView = () => {
-    navigate(`/documents/${doc.id}`);
+    onViewDetails?.(doc);
   };
 
   const handleVerify = () => {
@@ -511,153 +1076,245 @@ function DocumentActions({ doc, navigate, onAssignTemplate }) {
     onAssignTemplate(doc);
   };
 
+  const handleDelete = () => {
+    onDeleteDocument(doc);
+    setShowDropdown(false);
+  };
+
+  // Helper component to wrap action with dropdown menu
+  const ActionWithMenu = ({ children }) => (
+    <div className="flex items-center gap-2">
+      {children}
+      <div className="relative">
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            setShowDropdown(!showDropdown);
+          }}
+          className="p-1 text-gray-400 hover:text-gray-600 rounded hover:bg-gray-100"
+          title="More actions"
+        >
+          <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+            <path d="M10 6a2 2 0 110-4 2 2 0 010 4zM10 12a2 2 0 110-4 2 2 0 010 4zM10 18a2 2 0 110-4 2 2 0 010 4z" />
+          </svg>
+        </button>
+        {showDropdown && (
+          <>
+            <div
+              className="fixed inset-0 z-10"
+              onClick={() => setShowDropdown(false)}
+            />
+            <div className="absolute right-0 mt-1 w-40 bg-white rounded-lg shadow-lg border border-gray-200 py-1 z-20">
+              <button
+                onClick={handleDelete}
+                className="w-full px-4 py-2 text-left text-sm font-medium text-red-600 hover:bg-red-50 flex items-center gap-2"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                </svg>
+                Delete
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+
+  // Show extracting state if document is being polled for status updates
+  if (isProcessing) {
+    return (
+      <ActionWithMenu>
+        <div className="flex items-center gap-2 text-sm text-sky-700">
+          <div className="animate-spin h-3.5 w-3.5 border-2 border-sky-400 border-t-transparent rounded-full"></div>
+          <span className="italic">Extracting...</span>
+        </div>
+      </ActionWithMenu>
+    );
+  }
+
   // Smart actions based on status
   switch (doc.status) {
     case 'uploaded':
       return (
-        <span className="text-sm text-gray-400 italic">Waiting...</span>
+        <ActionWithMenu>
+          <span className="text-sm text-gray-400 italic">Waiting...</span>
+        </ActionWithMenu>
       );
 
     case 'analyzing':
       return (
-        <div className="flex items-center gap-2 text-sm text-gray-500">
-          <div className="animate-spin h-3.5 w-3.5 border-2 border-sky-400 border-t-transparent rounded-full"></div>
-          <span className="italic">Analyzing...</span>
-        </div>
+        <ActionWithMenu>
+          <div className="flex items-center gap-2 text-sm text-sky-700">
+            <div className="animate-spin h-3.5 w-3.5 border-2 border-sky-400 border-t-transparent rounded-full"></div>
+            <span className="italic">Analyzing...</span>
+          </div>
+        </ActionWithMenu>
       );
 
     case 'template_matched':
       return (
-        <button
-          onClick={doc.schema_id ? handleExtractData : handleAssignTemplate}
-          className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg border transition-colors whitespace-nowrap ${
-            doc.schema_id
-              ? 'border-coral-300 text-coral-700 hover:bg-coral-50'
-              : 'border-periwinkle-300 text-periwinkle-700 hover:bg-periwinkle-50'
-          }`}
-        >
-          {doc.schema_id ? (
-            <>
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
-              </svg>
-              Extract
-            </>
-          ) : (
-            <>
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
-              </svg>
-              Review
-            </>
-          )}
-        </button>
+        <ActionWithMenu>
+          <button
+            onClick={doc.schema_id ? handleExtractData : handleAssignTemplate}
+            className={`inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg border transition-colors whitespace-nowrap ${
+              doc.schema_id
+                ? 'border-coral-300 text-coral-700 hover:bg-coral-50'
+                : 'border-periwinkle-300 text-periwinkle-700 hover:bg-periwinkle-50'
+            }`}
+          >
+            {doc.schema_id ? (
+              <>
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+                </svg>
+                Extract
+              </>
+            ) : (
+              <>
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                </svg>
+                Review
+              </>
+            )}
+          </button>
+        </ActionWithMenu>
       );
 
     case 'template_needed':
       return (
-        <button
-          onClick={handleAssignTemplate}
-          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg border border-orange-300 text-orange-700 hover:bg-orange-50 transition-colors whitespace-nowrap"
-        >
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
-          </svg>
-          Select
-        </button>
+        <ActionWithMenu>
+          <button
+            onClick={handleAssignTemplate}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg border border-orange-300 text-orange-700 hover:bg-orange-50 transition-colors whitespace-nowrap"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
+            </svg>
+            Select
+          </button>
+        </ActionWithMenu>
       );
 
     case 'ready_to_process':
       return (
-        <button
-          onClick={handleExtractData}
-          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg border border-coral-300 text-coral-700 hover:bg-coral-50 transition-colors whitespace-nowrap"
-        >
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
-          </svg>
-          Extract
-        </button>
+        <ActionWithMenu>
+          <button
+            onClick={handleExtractData}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg border border-coral-300 text-coral-700 hover:bg-coral-50 transition-colors whitespace-nowrap"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+            </svg>
+            Extract
+          </button>
+        </ActionWithMenu>
       );
 
     case 'processing':
       return (
-        <div className="flex items-center gap-2 text-sm text-gray-500">
-          <div className="animate-spin h-3.5 w-3.5 border-2 border-sky-400 border-t-transparent rounded-full"></div>
-          <span className="italic">Extracting...</span>
-        </div>
+        <ActionWithMenu>
+          <div className="flex items-center gap-2 text-sm text-sky-700">
+            <div className="animate-spin h-3.5 w-3.5 border-2 border-sky-400 border-t-transparent rounded-full"></div>
+            <span className="italic">Extracting...</span>
+          </div>
+        </ActionWithMenu>
       );
 
     case 'completed':
       // Show Audit button if document has low-confidence fields
       if (doc.has_low_confidence_fields) {
         return (
+          <ActionWithMenu>
+            <button
+              onClick={() => navigate(`/audit/document/${doc.id}`)}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg border border-orange-300 text-orange-700 hover:bg-orange-50 transition-colors whitespace-nowrap"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+              </svg>
+              Audit
+            </button>
+          </ActionWithMenu>
+        );
+      }
+      // Otherwise show Verify button
+      return (
+        <ActionWithMenu>
           <button
-            onClick={() => navigate(`/audit/document/${doc.id}`)}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg border border-orange-300 text-orange-700 hover:bg-orange-50 transition-colors whitespace-nowrap"
+            onClick={handleVerify}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg border border-coral-300 text-coral-700 hover:bg-coral-50 transition-colors whitespace-nowrap"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            Verify
+          </button>
+        </ActionWithMenu>
+      );
+
+    case 'verified':
+      return (
+        <ActionWithMenu>
+          <button
+            onClick={handleView}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg border border-periwinkle-300 text-periwinkle-700 hover:bg-periwinkle-50 transition-colors whitespace-nowrap"
           >
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
             </svg>
-            Audit
+            View
           </button>
-        );
-      }
-      // Otherwise show Verify button
-      return (
-        <button
-          onClick={handleVerify}
-          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg border border-coral-300 text-coral-700 hover:bg-coral-50 transition-colors whitespace-nowrap"
-        >
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-          </svg>
-          Verify
-        </button>
-      );
-
-    case 'verified':
-      return (
-        <button
-          onClick={handleView}
-          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg border border-periwinkle-300 text-periwinkle-700 hover:bg-periwinkle-50 transition-colors whitespace-nowrap"
-        >
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
-          </svg>
-          View
-        </button>
+        </ActionWithMenu>
       );
 
     case 'error':
       return (
-        <button
-          onClick={handleRetry}
-          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg border border-orange-300 text-orange-700 hover:bg-orange-50 transition-colors whitespace-nowrap"
-          title={doc.error_message}
-        >
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-          </svg>
-          Retry
-        </button>
+        <ActionWithMenu>
+          <button
+            onClick={handleRetry}
+            disabled={isRetrying}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg border border-orange-300 text-orange-700 hover:bg-orange-50 transition-colors whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed"
+            title={doc.error_message}
+          >
+            {isRetrying ? (
+              <>
+                <svg className="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+                Retrying...
+              </>
+            ) : (
+              <>
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                </svg>
+                Retry
+              </>
+            )}
+          </button>
+        </ActionWithMenu>
       );
 
     default:
       return (
-        <button
-          onClick={handleView}
-          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg border border-periwinkle-300 text-periwinkle-700 hover:bg-periwinkle-50 transition-colors whitespace-nowrap"
-        >
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
-          </svg>
-          View
-        </button>
+        <ActionWithMenu>
+          <button
+            onClick={handleView}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg border border-periwinkle-300 text-periwinkle-700 hover:bg-periwinkle-50 transition-colors whitespace-nowrap"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+            </svg>
+            View
+          </button>
+        </ActionWithMenu>
       );
   }
 }

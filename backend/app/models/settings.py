@@ -40,6 +40,7 @@ class Organization(Base):
     # Relationships
     settings = relationship("Settings", back_populates="organization", cascade="all, delete-orphan")
     users = relationship("User", back_populates="organization", cascade="all, delete-orphan")
+    roles = relationship("Role", back_populates="organization", cascade="all, delete-orphan")
 
 
 class User(Base):
@@ -68,6 +69,11 @@ class User(Base):
     # Relationships
     organization = relationship("Organization", back_populates="users")
     settings = relationship("Settings", back_populates="user", cascade="all, delete-orphan")
+    user_roles = relationship("UserRole", foreign_keys="UserRole.user_id", back_populates="user", cascade="all, delete-orphan")
+    document_permissions = relationship("DocumentPermission", foreign_keys="DocumentPermission.user_id", back_populates="user")
+    folder_permissions = relationship("FolderPermission", foreign_keys="FolderPermission.user_id", back_populates="user")
+    share_links = relationship("ShareLink", foreign_keys="ShareLink.created_by_user_id", back_populates="created_by")
+    api_keys = relationship("APIKey", foreign_keys="APIKey.user_id", back_populates="user", cascade="all, delete-orphan")
 
 
 class Settings(Base):

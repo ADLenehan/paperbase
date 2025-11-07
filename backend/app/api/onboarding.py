@@ -7,6 +7,7 @@ from app.models.schema import Schema
 from app.services.reducto_service import ReductoService
 from app.services.claude_service import ClaudeService
 from app.services.elastic_service import ElasticsearchService
+from app.utils.reducto_validation import validate_schema_for_reducto, format_validation_report
 import logging
 import os
 import tempfile
@@ -75,6 +76,25 @@ async def analyze_samples(
         logger.info("Generating schema with Claude")
         schema_data = await claude_service.analyze_sample_documents(parsed_documents)
 
+        # NEW: Validate schema against Reducto requirements
+        validation_result = validate_schema_for_reducto(
+            {
+                "name": schema_data["name"],
+                "fields": schema_data["fields"]
+            },
+            strict=False
+        )
+
+        # Log validation results
+        if not validation_result["reducto_compatible"]:
+            logger.warning(
+                f"Schema '{schema_data['name']}' has Reducto compatibility issues: "
+                f"{len(validation_result['errors'])} errors, {len(validation_result['warnings'])} warnings"
+            )
+            logger.debug(format_validation_report(validation_result))
+        else:
+            logger.info(f"Schema '{schema_data['name']}' is Reducto-compatible")
+
         # Step 4: Store schema in database
         schema_name = schema_data["name"]
         existing_schema = db.query(Schema).filter(Schema.name == schema_name).first()
@@ -109,7 +129,15 @@ async def analyze_samples(
             "schema_id": schema_id,
             "schema": schema_data,
             "reducto_config": reducto_config,
-            "message": f"Schema '{schema_name}' created successfully"
+            # NEW: Include validation results
+            "reducto_validation": {
+                "compatible": validation_result["reducto_compatible"],
+                "errors": validation_result["errors"],
+                "warnings": validation_result["warnings"],
+                "recommendations": validation_result["recommendations"]
+            },
+            "message": f"Schema '{schema_name}' created successfully" +
+                       (f" ⚠️ {len(validation_result['errors'])} Reducto compatibility issues" if validation_result['errors'] else "")
         }
 
     except Exception as e:
@@ -160,6 +188,25 @@ async def create_schema(
     if existing:
         raise HTTPException(status_code=400, detail=f"Schema '{name}' already exists")
 
+    # NEW: Validate schema against Reducto requirements
+    validation_result = validate_schema_for_reducto(
+        {
+            "name": name,
+            "fields": fields
+        },
+        strict=False
+    )
+
+    # Log validation results
+    if not validation_result["reducto_compatible"]:
+        logger.warning(
+            f"Creating schema '{name}' with Reducto compatibility issues: "
+            f"{len(validation_result['errors'])} errors, {len(validation_result['warnings'])} warnings"
+        )
+        logger.debug(format_validation_report(validation_result))
+    else:
+        logger.info(f"Schema '{name}' is Reducto-compatible")
+
     # Create new schema
     new_schema = Schema(
         name=name,
@@ -183,7 +230,15 @@ async def create_schema(
     return {
         "success": True,
         "schema_id": new_schema.id,
-        "message": f"Schema '{name}' created successfully"
+        # NEW: Include validation results
+        "reducto_validation": {
+            "compatible": validation_result["reducto_compatible"],
+            "errors": validation_result["errors"],
+            "warnings": validation_result["warnings"],
+            "recommendations": validation_result["recommendations"]
+        },
+        "message": f"Schema '{name}' created successfully" +
+                   (f" ⚠️ {len(validation_result['errors'])} Reducto compatibility issues" if validation_result['errors'] else "")
     }
 
 

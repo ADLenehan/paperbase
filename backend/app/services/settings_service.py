@@ -116,11 +116,16 @@ class SettingsService:
         for setting in system_settings:
             value = self._deserialize_value(setting.value, setting.value_type)
             if include_metadata:
+                # Merge metadata from DEFAULT_SETTINGS
+                default_config = DEFAULT_SETTINGS.get(setting.key, {})
                 result[setting.key] = {
                     "value": value,
                     "source": "system",
                     "type": setting.value_type,
-                    "description": setting.description,
+                    "description": setting.description or default_config.get("description"),
+                    "category": default_config.get("category"),
+                    "min": default_config.get("min"),
+                    "max": default_config.get("max"),
                 }
             else:
                 result[setting.key] = value
@@ -135,11 +140,16 @@ class SettingsService:
             for setting in org_settings:
                 value = self._deserialize_value(setting.value, setting.value_type)
                 if include_metadata:
+                    # Merge metadata from DEFAULT_SETTINGS
+                    default_config = DEFAULT_SETTINGS.get(setting.key, {})
                     result[setting.key] = {
                         "value": value,
                         "source": "organization",
                         "type": setting.value_type,
-                        "description": setting.description,
+                        "description": setting.description or default_config.get("description"),
+                        "category": default_config.get("category"),
+                        "min": default_config.get("min"),
+                        "max": default_config.get("max"),
                     }
                 else:
                     result[setting.key] = value
@@ -154,11 +164,16 @@ class SettingsService:
             for setting in user_settings:
                 value = self._deserialize_value(setting.value, setting.value_type)
                 if include_metadata:
+                    # Merge metadata from DEFAULT_SETTINGS
+                    default_config = DEFAULT_SETTINGS.get(setting.key, {})
                     result[setting.key] = {
                         "value": value,
                         "source": "user",
                         "type": setting.value_type,
-                        "description": setting.description,
+                        "description": setting.description or default_config.get("description"),
+                        "category": default_config.get("category"),
+                        "min": default_config.get("min"),
+                        "max": default_config.get("max"),
                     }
                 else:
                     result[setting.key] = value

@@ -77,3 +77,16 @@ class ConfigurationError(PaperbaseException):
     """Raised when there's a configuration issue"""
     def __init__(self, message: str):
         super().__init__(message, status_code=500)
+
+
+class PermissionDeniedError(PaperbaseException):
+    """Raised when user lacks required permission"""
+    def __init__(self, message: str = "Permission denied"):
+        super().__init__(message, status_code=403)
+
+
+class ResourceNotFoundError(PaperbaseException):
+    """Raised when a resource is not found"""
+    def __init__(self, resource_type: str, resource_id: any):
+        message = f"{resource_type} with ID {resource_id} not found"
+        super().__init__(message, status_code=404)

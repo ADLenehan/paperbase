@@ -12,6 +12,7 @@ from app.services.elastic_service import ElasticsearchService
 from app.services.claude_service import ClaudeService
 from app.services.query_optimizer import QueryOptimizer
 from app.core.database import get_db
+from app.utils.query_field_extractor import extract_fields_from_es_query, filter_audit_items_by_fields
 from sqlalchemy.orm import Session
 import logging
 
@@ -751,6 +752,10 @@ async def rag_query_mcp(
                 for field, value in filters.items():
                     es_query["bool"]["filter"].append({"term": {field: value}})
 
+            # Extract field lineage from query
+            field_lineage = extract_fields_from_es_query(es_query)
+            logger.info(f"[MCP RAG] Extracted {len(field_lineage['queried_fields'])} queried fields: {field_lineage['queried_fields']}")
+
             # Execute search
             search_results = await elastic_service.search(
                 query=None,
@@ -800,14 +805,56 @@ Question: {question}
 
 Provide a clear, concise answer with citations to specific documents."""
 
-            # Get answer from Claude
-            answer = await claude_service.answer_question_about_results(
+            # Get answer from Claude (with confidence metadata)
+            answer_result = await claude_service.answer_question_about_results(
                 query=question,
                 search_results=search_results.get("documents", []),
-                total_count=search_results.get("total", 0)
+                total_count=search_results.get("total", 0),
+                include_confidence_metadata=True
             )
 
-            # Enhanced response with LLM guidance
+            # Extract answer text for backward compatibility
+            answer = answer_result.get("answer", "No answer available.")
+
+            # NEW: Get low-confidence fields for audit metadata
+            from app.utils.audit_helpers import (
+                get_low_confidence_fields_for_documents,
+                get_confidence_summary
+            )
+
+            # Extract document IDs from search results
+            document_ids = [c["document_id"] for c in context_chunks]
+
+            # Get low-confidence fields grouped by document
+            low_conf_fields_grouped = await get_low_confidence_fields_for_documents(
+                document_ids=document_ids,
+                db=db,
+                confidence_threshold=None  # Use settings default
+            )
+
+            # Flatten for audit_items array
+            all_audit_items = []
+            for doc_id, fields in low_conf_fields_grouped.items():
+                for field in fields:
+                    # Update audit URL with MCP-specific source
+                    field["audit_url"] = field["audit_url"].replace("source=ai_answer", "source=mcp_rag")
+                    all_audit_items.append(field)
+
+            # Filter audit items to only fields used in query
+            audit_items = filter_audit_items_by_fields(
+                all_audit_items,
+                field_lineage["queried_fields"]
+            )
+
+            logger.info(f"[MCP RAG] Filtered audit items from {len(all_audit_items)} to {len(audit_items)} (query-relevant only)")
+
+            # Get confidence summary stats
+            confidence_summary = await get_confidence_summary(
+                document_ids=document_ids,
+                db=db
+            )
+
+            # Enhanced response with LLM guidance + audit metadata
             response = {
                 "success": True,
                 "summary": f"Answered based on {len(context_chunks)} relevant documents",
@@ -828,11 +875,36 @@ Provide a clear, concise answer with citations to specific documents."""
                     "total_matches": search_results.get("total", 0),
                     "query_method": "claude" if query_optimizer.should_use_claude(query_analysis) else "optimizer"
                 },
+                # NEW: Field lineage tracking
+                "field_lineage": field_lineage,
+                # NEW: Audit metadata for low-confidence data (filtered to query-relevant fields only)
+                "audit_items": audit_items,
+                "audit_items_filtered_count": len(audit_items),
+                "audit_items_total_count": len(all_audit_items),
+                "confidence_summary": confidence_summary,
+                "data_quality": {
+                    "total_fields_cited": confidence_summary["total_fields"],
+                    "low_confidence_count": len(audit_items),  # Use filtered count
+                    "total_low_confidence_in_docs": len(all_audit_items),  # Total unfiltered
+                    "audit_recommended": confidence_summary["audit_recommended"],
+                    "avg_confidence": confidence_summary["avg_confidence"]
+                },
                 "next_steps": {
                     "to_read_source": f"Call get_document_content({context_chunks[0]['document_id']}) to read full source document" if context_chunks else None,
                     "to_refine": "Ask a follow-up question with rag_query for more detail",
-                    "to_find_more": "Use search_documents to find additional related documents"
-                }
+                    "to_find_more": "Use search_documents to find additional related documents",
+                    # NEW: Audit recommendation (using filtered count)
+                    "to_review_data": f"Review {len(audit_items)} query-relevant low-confidence fields (of {len(all_audit_items)} total)" if audit_items else None
+                },
+                "web_ui_access": {
+                    "audit_dashboard": f"{settings.FRONTEND_URL}/audit",
+                    "instructions": "Open this URL in your browser to review low-confidence fields"
+                } if audit_items else None,
+                "suggested_next_steps": [
+                    f"Open {settings.FRONTEND_URL}/audit to review low-confidence fields",
+                    "Click on fields with confidence < 0.6 to verify",
+                    "Use inline audit modal for quick verification"
+                ] if audit_items else []
             }
 
             return response

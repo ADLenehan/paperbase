@@ -99,16 +99,15 @@ function SortableField({ field, onUpdate, onRemove, depth = 0 }) {
 
   return (
     <div
-      ref={setNodeRef}
-      style={style}
       className={`${depth > 0 ? 'ml-8' : ''}`}
     >
       {/* Main Field Row */}
       <div
+        ref={setNodeRef}
+        style={style}
         {...attributes}
-        {...listeners}
         className={`
-          flex items-center gap-2 px-3 py-2.5 rounded-lg border cursor-grab active:cursor-grabbing
+          flex items-center gap-2 px-3 py-2.5 rounded-lg border
           ${isDragging ? 'border-periwinkle-400 shadow-lg bg-periwinkle-50' : 'border-gray-200 bg-white hover:border-gray-300'}
           transition-all
         `}
@@ -120,14 +119,18 @@ function SortableField({ field, onUpdate, onRemove, depth = 0 }) {
               e.stopPropagation();
               setExpanded(!expanded);
             }}
-            className="flex-shrink-0 w-5 h-5 flex items-center justify-center text-gray-500 hover:text-gray-700"
+            className="flex-shrink-0 w-5 h-5 flex items-center justify-center text-gray-500 hover:text-gray-700 transition-colors"
           >
             {expanded ? '▼' : '▶'}
           </button>
         )}
 
         {/* Drag Handle Indicator */}
-        <div className="flex-shrink-0 text-gray-400" title="Drag to reorder">
+        <div
+          {...listeners}
+          className="flex-shrink-0 text-gray-400 cursor-grab active:cursor-grabbing"
+          title="Drag to reorder"
+        >
           <svg className="w-4 h-4" viewBox="0 0 20 20" fill="currentColor">
             <path d="M7 3a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3zm6 0a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3zM7 8.5a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3zm6 0a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3zM7 14a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3zm6 0a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3z" />
           </svg>
@@ -156,6 +159,8 @@ function SortableField({ field, onUpdate, onRemove, depth = 0 }) {
           <option value="boolean">BOOL</option>
           <option value="array">ARR</option>
           <option value="object">OBJ</option>
+          <option value="table">TBL</option>
+          <option value="array_of_objects">ARR_OBJ</option>
         </select>
 
         {/* Description */}
@@ -246,7 +251,7 @@ function SortableField({ field, onUpdate, onRemove, depth = 0 }) {
   );
 }
 
-export default function FieldEditor({ templateId, templateName, initialFields, onSave, onCancel }) {
+export default function FieldEditor({ templateId, templateName, initialFields, onSave, onCancel, isSaving = false }) {
   const [fields, setFields] = useState(
     initialFields.map((field, idx) => ({
       ...field,
@@ -342,12 +347,31 @@ export default function FieldEditor({ templateId, templateName, initialFields, o
   };
 
   const handleSave = () => {
+    console.log('=== FieldEditor handleSave START ===');
+    console.log('onSave function:', onSave);
+    console.log('onSave type:', typeof onSave);
+    console.log('Fields:', fields);
+    console.log('saveAsNewTemplate:', saveAsNewTemplate);
+    console.log('hasChanges:', hasChanges);
+
     const cleanedFields = fields.map(({ id, ...field }) => field);
-    onSave({
+    console.log('Cleaned fields:', cleanedFields);
+
+    const saveData = {
       fields: cleanedFields,
       name: saveAsNewTemplate ? newTemplateName : templateName,
       isNewTemplate: saveAsNewTemplate || hasChanges,
-    });
+    };
+    console.log('About to call onSave with:', saveData);
+
+    try {
+      onSave(saveData);
+      console.log('onSave call completed (no error thrown)');
+    } catch (err) {
+      console.error('ERROR calling onSave:', err);
+    }
+
+    console.log('=== FieldEditor handleSave END ===');
   };
 
   return (
@@ -470,15 +494,27 @@ export default function FieldEditor({ templateId, templateName, initialFields, o
       <div className="flex gap-3 pt-4 border-t border-gray-200">
         <button
           onClick={onCancel}
-          className="flex-1 px-4 py-3 border border-gray-300 rounded-lg hover:bg-gray-50 font-medium transition-colors"
+          disabled={isSaving}
+          className="flex-1 px-4 py-3 border border-gray-300 rounded-lg hover:bg-gray-50 font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
         >
           Cancel
         </button>
         <button
           onClick={handleSave}
-          className="flex-1 px-4 py-3 bg-periwinkle-500 text-white rounded-lg hover:bg-periwinkle-600 font-medium transition-colors"
+          disabled={isSaving}
+          className="flex-1 px-4 py-3 bg-periwinkle-500 text-white rounded-lg hover:bg-periwinkle-600 font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
         >
-          {hasChanges ? (saveAsNewTemplate ? 'Save as New Template' : 'Update Template') : 'Save'}
+          {isSaving ? (
+            <>
+              <svg className="animate-spin h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+              </svg>
+              <span>Creating template...</span>
+            </>
+          ) : (
+            hasChanges ? (saveAsNewTemplate ? 'Save as New Template' : 'Update Template') : 'Save'
+          )}
         </button>
       </div>
     </div>

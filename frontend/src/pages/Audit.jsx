@@ -502,7 +502,7 @@ export default function Audit() {
             <button
               onClick={handleCorrect}
               disabled={verifying}
-              className="w-full bg-mint-600 text-white py-3 px-4 rounded-lg font-medium hover:bg-mint-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              className="w-full bg-periwinkle-600 text-white py-3 px-4 rounded-lg font-medium hover:bg-periwinkle-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
               ✓ Correct
             </button>
@@ -535,7 +535,7 @@ export default function Audit() {
               <button
                 onClick={() => setShowCorrectionInput(true)}
                 disabled={verifying}
-                className="w-full bg-periwinkle-600 text-white py-3 px-4 rounded-lg font-medium hover:bg-periwinkle-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                className="w-full border-2 border-periwinkle-500 text-periwinkle-700 bg-white py-3 px-4 rounded-lg font-medium hover:bg-periwinkle-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 ✗ Fix Value
               </button>

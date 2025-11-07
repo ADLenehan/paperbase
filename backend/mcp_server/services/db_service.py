@@ -34,15 +34,25 @@ class DatabaseService:
         """Initialize database connection"""
         # Convert sqlite:/// to sqlite+aiosqlite:/// for async support
         db_url = config.DATABASE_URL
-        if db_url.startswith("sqlite:///"):
+        is_sqlite = db_url.startswith("sqlite:///")
+
+        if is_sqlite:
             db_url = db_url.replace("sqlite:///", "sqlite+aiosqlite:///")
 
-        self.engine = create_async_engine(
-            db_url,
-            echo=False,
-            pool_size=config.SQLITE_POOL_SIZE,
-            pool_pre_ping=True
-        )
+        # SQLite with aiosqlite uses NullPool and doesn't support pool_size/pool_pre_ping
+        if is_sqlite:
+            self.engine = create_async_engine(
+                db_url,
+                echo=False,
+                connect_args={"check_same_thread": False}
+            )
+        else:
+            self.engine = create_async_engine(
+                db_url,
+                echo=False,
+                pool_size=config.SQLITE_POOL_SIZE,
+                pool_pre_ping=True
+            )
 
         self.async_session = sessionmaker(
             self.engine,
@@ -85,6 +95,10 @@ class DatabaseService:
             if not doc:
                 return None
 
+            # Get audit threshold from config
+            from mcp_server.config import config as mcp_config
+            audit_threshold = 0.6  # Default threshold
+
             # Format for MCP response (token-efficient)
             return {
                 "id": doc.id,
@@ -102,11 +116,25 @@ class DatabaseService:
                         "value": field.field_value,
                         "confidence": field.confidence_score,
                         "verified": field.verified,
-                        "needs_verification": field.needs_verification
+                        "needs_verification": field.needs_verification,
+                        # Add audit link for low-confidence fields
+                        "audit_link": (
+                            f"{mcp_config.FRONTEND_URL}/audit?"
+                            f"field_id={field.id}&"
+                            f"document_id={doc.id}&"
+                            f"highlight=true&"
+                            f"source=mcp_query"
+                        ) if (field.confidence_score and field.confidence_score < audit_threshold and not field.verified) else None,
+                        "low_confidence": (field.confidence_score < audit_threshold if field.confidence_score else False)
                     }
                     for field in doc.extracted_fields
                 ],
-                "error": doc.error_message
+                "error": doc.error_message,
+                "audit_summary": {
+                    "total_fields": len(doc.extracted_fields),
+                    "low_confidence_count": sum(1 for f in doc.extracted_fields if f.confidence_score and f.confidence_score < audit_threshold and not f.verified),
+                    "audit_threshold": audit_threshold
+                }
             }
 
     async def search_documents(

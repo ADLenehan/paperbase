@@ -5,7 +5,7 @@ services:
     environment:
       - discovery.type=single-node
       - xpack.security.enabled=false
-      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+      - "ES_JAVA_OPTS=-Xms1g -Xmx1g"
     ports:
       - "9200:9200"
       - "9300:9300"
@@ -29,7 +29,7 @@ services:
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
     volumes:
       - ./backend:/app
-      - ./uploads:/app/uploads
+      - ./backend/uploads:/app/uploads
     depends_on:
       elasticsearch:
         condition: service_healthy

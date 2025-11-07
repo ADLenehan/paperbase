@@ -16,7 +16,30 @@ class MCPConfig(BaseSettings):
     # Server Information
     SERVER_NAME: str = "paperbase-mcp"
     VERSION: str = "1.0.0"
-    DESCRIPTION: str = "Paperbase document extraction and search MCP server"
+    DESCRIPTION: str = """Paperbase document extraction and search MCP server.
+
+IMPORTANT: When displaying extracted document fields, ALWAYS show confidence scores AND audit links.
+
+Confidence scoring:
+- High (≥80%): Reliable, rarely needs verification
+- Medium (60-80%): May need review
+- Low (<60%): Requires human verification - INCLUDE AUDIT LINK
+
+Format field values as:
+- High/Medium confidence: "field_name: value (confidence: X%)"
+- Low confidence: "field_name: value (confidence: X% - [Verify in Audit]({audit_link}))"
+
+Example response format:
+"Based on the document, here are the extracted fields:
+- Invoice Number: INV-2024-001 (confidence: 95%)
+- Total Amount: $1,250.00 (confidence: 88%)
+- Vendor Name: Acme Corp (confidence: 58% - [Verify in Audit](http://localhost:3000/audit?field_id=123&document_id=45&highlight=true&source=mcp_query))"
+
+Each field includes an 'audit_link' property if confidence is low. Display it as a clickable link!
+Never display field values without their confidence scores unless explicitly asked."""
+
+    # Frontend URL for web UI access links
+    FRONTEND_URL: str = os.getenv("FRONTEND_URL", "http://localhost:3000")
 
     # Transports
     ENABLE_STDIO: bool = True

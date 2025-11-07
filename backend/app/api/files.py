@@ -30,8 +30,8 @@ async def get_document_preview(
     if not document:
         raise HTTPException(status_code=404, detail="Document not found")
 
-    # Get file path
-    file_path = document.file_path
+    # Get file path (use actual_file_path property for PhysicalFile compatibility)
+    file_path = document.actual_file_path
     if not file_path:
         raise HTTPException(status_code=404, detail="File path not found for document")
 
@@ -100,8 +100,8 @@ async def download_document(
     if not document:
         raise HTTPException(status_code=404, detail="Document not found")
 
-    # Get file path
-    file_path = document.file_path
+    # Get file path (use actual_file_path property for PhysicalFile compatibility)
+    file_path = document.actual_file_path
     if not file_path:
         raise HTTPException(status_code=404, detail="File path not found for document")
 

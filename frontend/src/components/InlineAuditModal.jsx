@@ -315,7 +315,7 @@ export default function InlineAuditModal({
                   <button
                     onClick={() => handleVerify('correct')}
                     disabled={isSubmitting}
-                    className="w-full flex items-center justify-center px-4 py-3 border border-transparent text-sm font-medium rounded-md text-white bg-mint-600 hover:bg-mint-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-mint-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="w-full flex items-center justify-center px-4 py-3 border border-transparent text-sm font-medium rounded-md text-white bg-periwinkle-600 hover:bg-periwinkle-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-periwinkle-500 disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     <svg className="w-5 h-5 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
@@ -326,7 +326,7 @@ export default function InlineAuditModal({
                   <button
                     onClick={() => setAction('incorrect')}
                     disabled={isSubmitting}
-                    className="w-full flex items-center justify-center px-4 py-3 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-periwinkle-500"
+                    className="w-full flex items-center justify-center px-4 py-3 border-2 border-periwinkle-500 text-sm font-medium rounded-md text-periwinkle-700 bg-white hover:bg-periwinkle-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-periwinkle-500"
                   >
                     <svg className="w-5 h-5 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
@@ -337,7 +337,7 @@ export default function InlineAuditModal({
                   <button
                     onClick={() => handleVerify('not_found')}
                     disabled={isSubmitting}
-                    className="w-full flex items-center justify-center px-4 py-3 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-periwinkle-500"
+                    className="w-full flex items-center justify-center px-4 py-3 border-2 border-coral-500 text-sm font-medium rounded-md text-coral-700 bg-white hover:bg-coral-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-coral-500"
                   >
                     <svg className="w-5 h-5 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />

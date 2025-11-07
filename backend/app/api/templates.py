@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.models.template import SchemaTemplate
+from app.models.schema import Schema
 from app.data.templates import BUILTIN_TEMPLATES
 import logging
 
@@ -12,37 +13,60 @@ router = APIRouter(prefix="/api/templates", tags=["templates"])
 @router.get("/")
 async def list_templates(db: Session = Depends(get_db)):
     """
-    List all available schema templates
+    List all available schema templates (both built-in and user-created)
 
     Returns templates sorted by:
-    1. Usage count (most popular first)
-    2. Category (invoices, contracts, etc.)
+    1. Built-in templates first (sorted by usage count)
+    2. User-created schemas (sorted by name)
     """
-    templates = db.query(SchemaTemplate).order_by(
+    # Get built-in templates
+    builtin_templates = db.query(SchemaTemplate).order_by(
         SchemaTemplate.usage_count.desc(),
         SchemaTemplate.category
     ).all()
 
     # If no templates exist, seed the database
-    if not templates:
+    if not builtin_templates:
         logger.info("No templates found, seeding built-in templates")
-        templates = seed_builtin_templates(db)
+        builtin_templates = seed_builtin_templates(db)
 
-    return {
-        "templates": [
-            {
-                "id": t.id,
-                "name": t.name,
-                "category": t.category,
-                "description": t.description,
-                "icon": t.icon,
-                "field_count": len(t.fields),
-                "usage_count": t.usage_count,
-                "is_builtin": t.is_builtin
-            }
-            for t in templates
-        ]
-    }
+    # Get user-created schemas
+    user_schemas = db.query(Schema).order_by(Schema.name).all()
+
+    # Combine both lists
+    all_templates = []
+
+    # Add built-in templates
+    for t in builtin_templates:
+        all_templates.append({
+            "id": f"template_{t.id}",  # Prefix to distinguish from schemas
+            "schema_id": None,
+            "template_id": t.id,
+            "name": t.name,
+            "category": t.category,
+            "description": t.description,
+            "icon": t.icon,
+            "field_count": len(t.fields),
+            "usage_count": t.usage_count,
+            "is_builtin": True
+        })
+
+    # Add user-created schemas
+    for s in user_schemas:
+        all_templates.append({
+            "id": f"schema_{s.id}",  # Prefix to distinguish from templates
+            "schema_id": s.id,
+            "template_id": None,
+            "name": s.name,
+            "category": "custom",  # User schemas don't have category
+            "description": f"Custom schema ({len(s.fields)} fields)",
+            "icon": "📝",  # Generic icon for custom schemas
+            "field_count": len(s.fields),
+            "usage_count": 0,  # User schemas don't track usage
+            "is_builtin": False
+        })
+
+    return {"templates": all_templates}
 
 
 @router.get("/{template_id}")

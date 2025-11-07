@@ -42,7 +42,7 @@ async def hybrid_match_document(
     """
 
     # Validate document has parse results
-    if not document.reducto_parse_result:
+    if not document.actual_parse_result:
         return _no_match_result("No parse result available")
 
     # Get settings (with fallbacks for when db is not available)
@@ -67,9 +67,9 @@ async def hybrid_match_document(
         )
 
     # Extract document characteristics
-    chunks = document.reducto_parse_result.get("chunks", [])
+    chunks = document.actual_parse_result.get("chunks", [])
     doc_text = "\n".join([c.get("content", "") for c in chunks[:10]])
-    doc_fields = extract_field_names_from_parse(document.reducto_parse_result)
+    doc_fields = extract_field_names_from_parse(document.actual_parse_result)
 
     logger.info(f"Matching document {document.filename} with {len(doc_fields)} fields")
 
@@ -106,7 +106,7 @@ async def hybrid_match_document(
 
         try:
             claude_result = await claude_service.match_document_to_template(
-                parsed_document=document.reducto_parse_result,
+                parsed_document=document.actual_parse_result,
                 available_templates=available_templates
             )
 
@@ -167,7 +167,7 @@ async def auto_match_documents(
     matches = []
 
     for doc in documents:
-        if not doc.reducto_parse_result:
+        if not doc.actual_parse_result:
             continue
 
         # Use hybrid matching

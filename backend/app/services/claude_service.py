@@ -10,6 +10,154 @@ import logging
 logger = logging.getLogger(__name__)
 
 
+# ==================== CACHED SYSTEM PROMPTS ====================
+# These prompts are extracted as constants to enable prompt caching.
+# Using cache_control: {"type": "ephemeral"} reduces costs by 80-90%.
+
+SCHEMA_GENERATION_SYSTEM = """You are an expert at analyzing documents and generating extraction schemas.
+
+Your schemas are used to extract structured data from similar documents using Reducto.
+
+IMPORTANT RULES:
+- Use snake_case for field names (e.g., "invoice_date" not "invoiceDate")
+- Set realistic confidence thresholds (0.6-0.9 range)
+- Include 5-15 most important fields only (avoid over-extraction)
+- Provide extraction hints from actual document text you see
+- Consider data types carefully: text, date, number, boolean, array, table, array_of_objects
+- For complex data (tables, arrays), assess extraction difficulty with complexity score (0-100)
+- Include a complexity_assessment with score, confidence, warnings, and recommendation
+
+Field types:
+- text: Simple text strings
+- date: ISO date format (YYYY-MM-DD)
+- number: Numeric values (integers or decimals)
+- boolean: True/False values
+- array: List of simple values (e.g., ["red", "blue", "green"])
+- table: Multi-column tabular data with headers
+- array_of_objects: List of structured items (e.g., line items with quantity, price, description)
+
+Complexity scoring:
+- 0-50 (Auto): Simple documents with basic fields → confidence 0.8-0.95
+- 51-80 (Assisted): Medium complexity with tables/arrays → confidence 0.6-0.75
+- 81+ (Manual): High complexity requiring careful review → confidence 0.3-0.5
+
+Return JSON in this exact format:
+{
+    "name": "Template Name",
+    "fields": [
+        {
+            "name": "field_name",
+            "type": "text|date|number|boolean|array|table|array_of_objects",
+            "required": true,
+            "extraction_hints": ["Text patterns to look for"],
+            "confidence_threshold": 0.75,
+            "description": "What this field represents"
+        }
+    ],
+    "complexity_assessment": {
+        "score": 45,
+        "confidence": 0.85,
+        "warnings": ["Any concerns or edge cases"],
+        "recommendation": "auto|assisted|manual"
+    }
+}
+"""
+
+ANSWER_GENERATION_SYSTEM = """You are an expert at generating clear, concise answers based on search results.
+
+Your task is to analyze search results and provide natural language answers that:
+- Summarize what was found (2-4 sentences)
+- Highlight key patterns or insights
+- Mention noteworthy findings (high/low values, trends, anomalies)
+- **CRITICALLY IMPORTANT**: Cite specific field values with inline references using this format:
+  "The [field_name] is [value] [[FIELD:field_name:document_id]]"
+  Example: "The back rise for size 2 is 7 1/2 inches [[FIELD:back_rise_size_2:123]]"
+- Flag low-confidence data (confidence < 0.7) when present
+- For each factual value you mention, include a field reference marker
+
+When data quality is uncertain, acknowledge it explicitly.
+Be professional but conversational in tone.
+
+**FIELD REFERENCE FORMAT**:
+- Use [[FIELD:field_name:document_id]] immediately after stating a value
+- This allows the UI to show confidence indicators and PDF highlights
+- Example: "The invoice total is $1,234.56 [[FIELD:invoice_total:456]]"
+"""
+
+TEMPLATE_MATCHING_SYSTEM = """You are an expert at analyzing documents and matching them to extraction templates.
+
+Your task is to:
+1. Analyze the document structure and content
+2. Determine if it matches any available template based on field similarity
+3. Provide a confidence score (0.0-1.0) for the match
+4. Recommend creating a new template if confidence < 0.7
+
+Consider:
+- Field presence and structure
+- Document layout and formatting
+- Content type and domain
+- Key data elements
+
+Return JSON with template_id (or null), confidence, reasoning, and needs_new_template flag."""
+
+DOCUMENT_GROUPING_SYSTEM = """You are an expert at analyzing documents and grouping them by similarity.
+
+Your task is to:
+1. Identify which documents are similar (same type/structure)
+2. Group similar documents together
+3. Suggest descriptive names for each group
+4. List common fields expected in each group
+
+Consider:
+- Document structure and layout
+- Field types and names
+- Content patterns
+- Domain and purpose
+
+Return JSON array of groups with document_indices, suggested_name, confidence, and common_fields."""
+
+SEMANTIC_QUERY_SYSTEM = """You are a SEMANTIC QUERY TRANSLATOR for document search.
+
+YOUR CRITICAL MISSION: Map user's natural language to PRECISE search fields.
+
+YOUR PROCESS:
+1. **Semantic Field Mapping** (HIGHEST PRIORITY):
+   - Extract key terms from user query
+   - Match terms to field names using the mapping guide provided
+   - Generate multi_match query with field boosting
+
+2. **Query Type Detection**:
+   - search: Find specific documents
+   - aggregation: Calculate totals/averages/counts
+   - anomaly: Find unusual patterns (duplicates, outliers)
+   - comparison: Compare time periods
+
+3. **Filter Extraction**:
+   - Date ranges (use date_context provided for "last month", "Q4 2024", etc.)
+   - Numeric ranges (amounts, counts)
+   - Text filters (vendors, statuses)
+   - Use fuzzy matching for text (e.g., "Acme" matches "Acme Corp", "ACME Inc")
+
+4. **Clarification Detection**:
+   - If query is ambiguous, set needs_clarification=true
+   - Ask a specific question to clarify user intent
+
+Return ONLY JSON (no markdown, no explanation outside JSON) with:
+- query_type, needs_clarification, elasticsearch_query, explanation, aggregation, filters, date_range
+
+QUERY CONSTRUCTION RULES:
+- ✅ ALWAYS use multi_match with field boosting for search queries
+- ✅ Map query terms to fields using the semantic guide
+- ✅ Use "range" queries for dates and numbers in filter clauses
+- ✅ Use "term" queries for exact matches (status, IDs) in filter clauses
+- ✅ Use fuzzy "match" queries for text (vendor names, descriptions)
+- ⚠️  CRITICAL: Distinguish VALUE EXTRACTION from TEXT SEARCH
+  - "What [field] is..." / "What [field] are..." = VALUE EXTRACTION → use exists query
+  - "Find documents about [topic]" = TEXT SEARCH → use multi_match
+- ❌ NEVER create {"match": {"full_text": "..."}} queries (too broad)
+- ❌ NEVER add template_name filters (system handles this automatically)"""
+
+
 class ClaudeService:
     """
     Service for interacting with Anthropic Claude API for schema generation.
@@ -87,6 +235,14 @@ class ClaudeService:
             message = self.client.messages.create(
                 model=self.model,
                 max_tokens=4096,
+                # Cached system prompt for 80-90% cost reduction
+                system=[
+                    {
+                        "type": "text",
+                        "text": SCHEMA_GENERATION_SYSTEM,
+                        "cache_control": {"type": "ephemeral"}  # Cache for 5 minutes
+                    }
+                ],
                 messages=[
                     {
                         "role": "user",
@@ -94,6 +250,14 @@ class ClaudeService:
                     }
                 ]
             )
+
+            # Log cache usage for cost tracking
+            usage = message.usage
+            if hasattr(usage, 'cache_creation_input_tokens'):
+                logger.info(f"Prompt cache: {usage.cache_creation_input_tokens} tokens cached")
+            if hasattr(usage, 'cache_read_input_tokens'):
+                logger.info(f"Prompt cache: {usage.cache_read_input_tokens} tokens read from cache (90% savings)")
+
 
             # Parse Claude's response
             response_text = message.content[0].text
@@ -653,6 +817,14 @@ Return ONLY JSON:
             message = self.client.messages.create(
                 model=self.model,
                 max_tokens=512,
+                # Cached system prompt for 80-90% cost reduction
+                system=[
+                    {
+                        "type": "text",
+                        "text": TEMPLATE_MATCHING_SYSTEM,
+                        "cache_control": {"type": "ephemeral"}
+                    }
+                ],
                 messages=[{"role": "user", "content": prompt}]
             )
 
@@ -764,6 +936,14 @@ Return ONLY JSON array:
             message = self.client.messages.create(
                 model=self.model,
                 max_tokens=2048,
+                # Cached system prompt for 80-90% cost reduction
+                system=[
+                    {
+                        "type": "text",
+                        "text": DOCUMENT_GROUPING_SYSTEM,
+                        "cache_control": {"type": "ephemeral"}
+                    }
+                ],
                 messages=[{"role": "user", "content": prompt}]
             )
 
@@ -891,7 +1071,9 @@ Examples:
         query: str,
         search_results: List[Dict[str, Any]],
         total_count: int,
-        include_confidence_metadata: bool = True
+        include_confidence_metadata: bool = True,
+        aggregation_results: Optional[Dict[str, Any]] = None,
+        aggregation_type: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         Generate natural language answer about search results with optional confidence metadata.
@@ -901,6 +1083,8 @@ Examples:
             search_results: List of matching documents
             total_count: Total number of matches
             include_confidence_metadata: If True, include confidence scores and structured output
+            aggregation_results: Optional aggregation results from Elasticsearch
+            aggregation_type: Type of aggregation (sum, avg, count, etc.)
 
         Returns:
             If include_confidence_metadata=True:
@@ -915,6 +1099,14 @@ Examples:
                     "answer": "Natural language answer"
                 }
         """
+        # Handle aggregation queries separately
+        if aggregation_results and aggregation_type:
+            return await self._generate_aggregation_answer(
+                query=query,
+                aggregation_results=aggregation_results,
+                aggregation_type=aggregation_type,
+                total_count=total_count
+            )
         # Build enhanced results with confidence metadata
         results_summary = []
         for doc in search_results[:10]:  # Increased from 5 to 10
@@ -945,7 +1137,7 @@ Examples:
                 })
 
         if include_confidence_metadata:
-            # Enhanced prompt with confidence awareness
+            # Enhanced prompt with confidence awareness AND field references
             prompt = f"""Answer this question based on the search results. Pay attention to data quality.
 
 User question: "{query}"
@@ -957,12 +1149,17 @@ Documents (with quality metadata):
 
 Instructions:
 1. Provide a clear, concise answer (2-4 sentences)
-2. Note which document IDs you used for factual claims
-3. If using data with low confidence (<0.7), mention uncertainty
+2. **CRITICALLY IMPORTANT**: For EVERY specific value you mention, include an inline field reference:
+   Format: "The [field] is [value] [[FIELD:field_name:document_id]]"
+   Examples:
+   - "The back rise for size 2 is 7 1/2 inches [[FIELD:back_rise_size_2:123]]"
+   - "The invoice total is $1,234.56 [[FIELD:invoice_total:456]]"
+3. Note which document IDs you used for factual claims
+4. If using data with low confidence (<0.7), mention uncertainty
 
 Return ONLY valid JSON with this structure:
 {{
-    "answer": "Your natural language answer here",
+    "answer": "Your natural language answer here WITH [[FIELD:name:id]] markers after each value",
     "sources_used": [document_ids_you_referenced],
     "low_confidence_warnings": [
         {{"document_id": 123, "field": "field_name", "confidence": 0.55}}
@@ -973,7 +1170,9 @@ Return ONLY valid JSON with this structure:
 Set confidence_level based on:
 - high: All data >= 0.8 confidence
 - medium: Some data 0.6-0.8 confidence
-- low: Any data < 0.6 confidence"""
+- low: Any data < 0.6 confidence
+
+**REMEMBER**: Add [[FIELD:field_name:doc_id]] after EVERY factual value you state!"""
         else:
             # Legacy prompt (backward compatible)
             prompt = f"""Answer this question based on the search results.
@@ -996,6 +1195,14 @@ Keep it concise (2-3 sentences)."""
             message = self.client.messages.create(
                 model=self.model,
                 max_tokens=1024,  # Increased for structured output
+                # Cached system prompt for 80-90% cost reduction
+                system=[
+                    {
+                        "type": "text",
+                        "text": ANSWER_GENERATION_SYSTEM,
+                        "cache_control": {"type": "ephemeral"}
+                    }
+                ],
                 messages=[{"role": "user", "content": prompt}]
             )
 
@@ -1048,6 +1255,96 @@ Keep it concise (2-3 sentences)."""
                 "sources_used": [],
                 "low_confidence_warnings": [],
                 "confidence_level": "unknown"
+            }
+
+    async def _generate_aggregation_answer(
+        self,
+        query: str,
+        aggregation_results: Dict[str, Any],
+        aggregation_type: str,
+        total_count: int
+    ) -> Dict[str, Any]:
+        """
+        Generate natural language answer for aggregation queries.
+
+        Args:
+            query: User's original query
+            aggregation_results: Elasticsearch aggregation results
+            aggregation_type: Type of aggregation (sum, avg, count, etc.)
+            total_count: Total number of documents in aggregation
+
+        Returns:
+            Structured answer with aggregation data
+        """
+        try:
+            # Extract aggregation value from ES results
+            # ES returns results like: {"field_stats": {"count": 100, "min": 50, "max": 1000, "avg": 250, "sum": 25000}}
+            agg_data = None
+            for key, value in aggregation_results.items():
+                if key.endswith("_stats") or key.endswith("_value_count") or key.endswith("_terms"):
+                    agg_data = value
+                    break
+
+            if not agg_data:
+                logger.warning(f"No aggregation data found in results: {aggregation_results}")
+                return {
+                    "answer": f"Found {total_count} matching documents, but could not calculate {aggregation_type}.",
+                    "sources_used": [],
+                    "low_confidence_warnings": [],
+                    "confidence_level": "low"
+                }
+
+            # Format answer based on aggregation type
+            if aggregation_type == "sum":
+                total_value = agg_data.get("sum", 0)
+                answer = f"The total is {total_value:,.2f} across {total_count} documents."
+
+            elif aggregation_type == "avg":
+                avg_value = agg_data.get("avg", 0)
+                answer = f"The average is {avg_value:,.2f} across {total_count} documents."
+
+            elif aggregation_type == "count":
+                count = agg_data.get("value", total_count)
+                answer = f"There are {count:,} matching documents."
+
+            elif aggregation_type == "min":
+                min_value = agg_data.get("min", 0)
+                answer = f"The minimum value is {min_value:,.2f} across {total_count} documents."
+
+            elif aggregation_type == "max":
+                max_value = agg_data.get("max", 0)
+                answer = f"The maximum value is {max_value:,.2f} across {total_count} documents."
+
+            elif aggregation_type == "group_by":
+                # For terms aggregation, format bucket counts
+                buckets = agg_data.get("buckets", [])
+                if buckets:
+                    items = [f"{bucket['key']}: {bucket['doc_count']}" for bucket in buckets[:10]]
+                    answer = f"Results grouped by {', '.join(items)}"
+                    if len(buckets) > 10:
+                        answer += f" (and {len(buckets) - 10} more)"
+                else:
+                    answer = f"Found {total_count} documents but no groups to display."
+
+            else:
+                # Generic fallback
+                answer = f"Calculated {aggregation_type} across {total_count} documents: {agg_data}"
+
+            return {
+                "answer": answer,
+                "sources_used": [],
+                "low_confidence_warnings": [],
+                "confidence_level": "high",  # Aggregations are always high confidence (calculated from full dataset)
+                "aggregation_data": agg_data  # Include raw data for frontend to display
+            }
+
+        except Exception as e:
+            logger.error(f"Error generating aggregation answer: {e}")
+            return {
+                "answer": f"Found {total_count} matching documents, but could not calculate {aggregation_type}.",
+                "sources_used": [],
+                "low_confidence_warnings": [],
+                "confidence_level": "low"
             }
 
     async def parse_natural_language_query(
@@ -1158,11 +1455,9 @@ Keep it concise (2-3 sentences)."""
 ⚠️  Template filter is automatic - DO NOT add template_name to your query filters
 """
 
-        prompt = f"""You are a SEMANTIC QUERY TRANSLATOR for document search.
-
-YOUR CRITICAL MISSION: Map user's natural language to PRECISE search fields.
-
-{semantic_guide}
+        # Build user prompt with dynamic context (semantic guide, date context, fields)
+        # Static instructions are in SEMANTIC_QUERY_SYSTEM for caching
+        prompt = f"""{semantic_guide}
 {template_routing}
 
 Current date: {today.strftime("%Y-%m-%d")}
@@ -1173,62 +1468,36 @@ Additional field information:
 
 User query: "{query}"{history_context}
 
-YOUR PROCESS:
-1. **Semantic Field Mapping** (HIGHEST PRIORITY):
-   - Extract key terms from user query
-   - Match terms to field names using the mapping guide above
-   - Generate multi_match query with field boosting
-
-2. **Query Type Detection**:
-   - search: Find specific documents
-   - aggregation: Calculate totals/averages/counts
-   - anomaly: Find unusual patterns (duplicates, outliers)
-   - comparison: Compare time periods
-
-3. **Filter Extraction**:
-   - Date ranges (use date_context above for "last month", "Q4 2024", etc.)
-   - Numeric ranges (amounts, counts)
-   - Text filters (vendors, statuses)
-   - Use fuzzy matching for text (e.g., "Acme" matches "Acme Corp", "ACME Inc")
-
-4. **Clarification Detection**:
-   - If query is ambiguous, set needs_clarification=true
-   - Ask a specific question to clarify user intent
-
 Return ONLY JSON (no markdown, no explanation outside JSON):
 {{
     "query_type": "search|aggregation|anomaly|comparison",
     "needs_clarification": false,
     "clarifying_question": null,
-    "elasticsearch_query": {{
-        "query": {{
-            "multi_match": {{
-                "query": "search terms",
-                "fields": ["specific_field^10", "related_field^5", "full_text^1"],
-                "type": "best_fields"
-            }}
-        }}
-    }},
+    "elasticsearch_query": {{...}},
     "explanation": "Human-readable explanation",
     "aggregation": {{"type": "sum|avg|count|group_by", "field": "field_name", "value_field": "optional"}},
     "filters": {{"field": "value"}},
     "date_range": {{"from": "YYYY-MM-DD", "to": "YYYY-MM-DD"}}
 }}
 
-QUERY CONSTRUCTION RULES:
-- ✅ ALWAYS use multi_match with field boosting for search queries
-- ✅ Map query terms to fields using the semantic guide above
-- ✅ Use "range" queries for dates and numbers in filter clauses
-- ✅ Use "term" queries for exact matches (status, IDs) in filter clauses
-- ✅ Use fuzzy "match" queries for text (vendor names, descriptions)
-- ❌ NEVER create {{"match": {{"full_text": "..."}}}} queries (too broad)
-- ❌ NEVER add template_name filters (system handles this automatically)
-
 CONCRETE EXAMPLES:
 
-Example 1: Field-Specific Search
-Query: "what cloud platform is used?"
-Analysis: "cloud" + "platform" → matches field "cloud_platform"
+Example 1a: VALUE EXTRACTION (asks "What is X?")
+Query: "What cloud provider are we mentioning here?"
+Analysis: User wants the VALUE of cloud_platform field, not searching for text "cloud provider"
+Generated Query:
+{{
+  "bool": {{
+    "filter": [
+      {{"exists": {{"field": "cloud_platform"}}}}
+    ]
+  }}
+}}
+Explanation: "Retrieving documents to extract cloud_platform value"
+
+Example 1b: TEXT SEARCH (asks "Find documents about X")
+Query: "find documents about cloud platforms"
+Analysis: User wants documents containing text about cloud platforms
 Generated Query:
 {{
   "multi_match": {{
@@ -1237,6 +1506,7 @@ Generated Query:
     "type": "best_fields"
   }}
 }}
+Explanation: "Searching for cloud platform information across cloud platform fields and general content"
 
 Example 2: Cross-Field Range Query
 Query: "invoices over $5000 last quarter"
@@ -1272,6 +1542,14 @@ Now parse the user query above and return ONLY the JSON response."""
             message = self.client.messages.create(
                 model=self.model,
                 max_tokens=2048,
+                # Cached system prompt for 80-90% cost reduction on NL search
+                system=[
+                    {
+                        "type": "text",
+                        "text": SEMANTIC_QUERY_SYSTEM,
+                        "cache_control": {"type": "ephemeral"}
+                    }
+                ],
                 messages=[{"role": "user", "content": prompt}]
             )
 

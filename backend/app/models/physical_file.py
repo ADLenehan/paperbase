@@ -27,6 +27,7 @@ class PhysicalFile(Base):
 
     # Relationships
     extractions = relationship("Extraction", back_populates="physical_file", cascade="all, delete-orphan")
+    documents = relationship("Document", back_populates="physical_file")  # For bulk upload flow
 
     def __repr__(self):
         return f"<PhysicalFile(id={self.id}, filename='{self.filename}', hash='{self.file_hash[:8]}...')>"

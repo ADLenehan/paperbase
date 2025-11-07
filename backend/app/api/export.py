@@ -20,7 +20,8 @@ router = APIRouter(prefix="/api/export", tags=["export"])
 
 class ExportRequest(BaseModel):
     """Request model for custom exports"""
-    template_id: Optional[int] = Field(None, description="Filter by template ID")
+    template_id: Optional[int] = Field(None, description="Single template ID (for backwards compatibility)")
+    template_ids: Optional[List[int]] = Field(None, description="Multiple template IDs for multi-template export")
     document_ids: Optional[List[int]] = Field(None, description="Specific document IDs to export")
     date_from: Optional[date] = Field(None, description="Start date filter")
     date_to: Optional[date] = Field(None, description="End date filter")
@@ -29,6 +30,12 @@ class ExportRequest(BaseModel):
     status: Optional[str] = Field(None, description="Filter by document status")
     include_metadata: bool = Field(True, description="Include confidence scores and verification status")
     format_type: str = Field("wide", description="wide (one row per doc) or long (one row per field)")
+    expand_complex_fields: bool = Field(True, description="For Excel, create separate sheets for tables/arrays")
+
+
+class AnalyzeTemplatesRequest(BaseModel):
+    """Request model for analyzing template compatibility"""
+    template_ids: List[int] = Field(..., description="List of template IDs to analyze")
 
 
 @router.get("/templates")
@@ -102,6 +109,36 @@ async def get_export_summary(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.post("/analyze-templates")
+async def analyze_template_compatibility(
+    request: AnalyzeTemplatesRequest,
+    db: Session = Depends(get_db)
+):
+    """
+    Analyze compatibility between multiple templates for export
+
+    Returns analysis including:
+    - Recommended strategy (merged vs separated)
+    - Field overlap percentage
+    - Common and unique fields
+    - Complex field detection
+    - Format recommendations
+    """
+    try:
+        analysis = ExportService.analyze_template_compatibility(
+            db=db,
+            template_ids=request.template_ids
+        )
+
+        return analysis
+
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error analyzing templates: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.get("/template/{template_id}/csv")
 async def export_template_csv(
     template_id: int,
@@ -164,10 +201,15 @@ async def export_template_excel(
     confidence_min: float = Query(0.0, ge=0.0, le=1.0),
     verified_only: bool = Query(False),
     include_metadata: bool = Query(True),
+    expand_complex_fields: bool = Query(True, description="Create separate sheets for tables/arrays"),
     db: Session = Depends(get_db)
 ):
     """
     Export all documents for a template as Excel file with formatting
+
+    If expand_complex_fields=true (default), creates separate sheets for:
+    - Table fields (e.g., grading_table)
+    - Array of objects fields (e.g., line_items)
     """
     try:
         template = db.query(SchemaTemplate).filter(SchemaTemplate.id == template_id).first()
@@ -192,7 +234,9 @@ async def export_template_excel(
         excel_data = ExportService.export_to_excel(
             records,
             include_metadata=include_metadata,
-            sheet_name=template.name[:31]  # Excel sheet name limit
+            sheet_name=template.name[:31],  # Excel sheet name limit
+            documents=documents,  # Pass documents for complex field expansion
+            expand_complex_fields=expand_complex_fields
         )
 
         filename = f"{template.name.replace(' ', '_')}_{datetime.now().strftime('%Y%m%d')}.xlsx"
@@ -274,10 +318,68 @@ async def export_custom(
     """
     Custom export with advanced filtering options
 
-    Allows exporting specific documents, date ranges, confidence thresholds, etc.
+    Supports:
+    - Single template export (template_id)
+    - Multi-template export (template_ids) with automatic merge/separate strategy
+    - Specific document export (document_ids)
+    - Complex field expansion for Excel (expand_complex_fields)
+    - Date ranges, confidence filtering, verification status
     """
     try:
-        # Build query with all filters
+        # Handle multi-template export
+        if request.template_ids and len(request.template_ids) > 0:
+            # Analyze template compatibility
+            analysis = ExportService.analyze_template_compatibility(
+                db=db,
+                template_ids=request.template_ids
+            )
+
+            # Use recommended strategy
+            if analysis["strategy"] == "merged" or len(request.template_ids) == 1:
+                data = ExportService.export_multi_template_merged(
+                    db=db,
+                    template_ids=request.template_ids,
+                    format=format,
+                    date_from=request.date_from,
+                    date_to=request.date_to,
+                    expand_complex_fields=request.expand_complex_fields,
+                    confidence_min=request.confidence_min,
+                    verified_only=request.verified_only,
+                    status=request.status
+                )
+            else:
+                data = ExportService.export_multi_template_separated(
+                    db=db,
+                    template_ids=request.template_ids,
+                    format=format,
+                    date_from=request.date_from,
+                    date_to=request.date_to,
+                    expand_complex_fields=request.expand_complex_fields,
+                    confidence_min=request.confidence_min,
+                    verified_only=request.verified_only,
+                    status=request.status
+                )
+
+            # Determine media type and extension
+            if format == "csv":
+                media_type = "text/csv"
+                extension = "csv"
+            elif format == "excel":
+                media_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                extension = "xlsx"
+            else:
+                media_type = "application/json"
+                extension = "json"
+
+            filename = f"export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.{extension}"
+
+            return Response(
+                content=data,
+                media_type=media_type,
+                headers={"Content-Disposition": f"attachment; filename={filename}"}
+            )
+
+        # Single template or document-specific export
         query = ExportService.build_export_query(
             db=db,
             template_id=request.template_id,
@@ -306,7 +408,12 @@ async def export_custom(
             media_type = "text/csv"
             extension = "csv"
         elif format == "excel":
-            data = ExportService.export_to_excel(records, include_metadata=request.include_metadata)
+            data = ExportService.export_to_excel(
+                records,
+                include_metadata=request.include_metadata,
+                documents=documents,  # Pass documents for complex field expansion
+                expand_complex_fields=request.expand_complex_fields
+            )
             media_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             extension = "xlsx"
         elif format == "json":
@@ -337,12 +444,14 @@ async def export_documents(
     document_ids: str = Query(..., description="Comma-separated document IDs"),
     format: str = Query("excel", description="csv, excel, or json"),
     include_metadata: bool = Query(True),
+    expand_complex_fields: bool = Query(True, description="Create separate sheets for tables/arrays"),
     db: Session = Depends(get_db)
 ):
     """
     Export specific documents by ID
 
-    Useful for exporting selected documents from the UI
+    Useful for exporting selected documents from the UI.
+    Supports complex field expansion for Excel exports (default: true).
     """
     try:
         # Parse document IDs
@@ -366,7 +475,12 @@ async def export_documents(
             media_type = "text/csv"
             extension = "csv"
         elif format == "excel":
-            data = ExportService.export_to_excel(records, include_metadata=include_metadata)
+            data = ExportService.export_to_excel(
+                records,
+                include_metadata=include_metadata,
+                documents=documents,  # Pass documents for complex field expansion
+                expand_complex_fields=expand_complex_fields
+            )
             media_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             extension = "xlsx"
         elif format == "json":

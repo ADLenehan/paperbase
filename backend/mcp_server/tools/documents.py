@@ -172,16 +172,20 @@ async def get_document_by_filename(
     exact_match: bool = False
 ) -> Dict[str, Any]:
     """
-    Find document(s) by filename.
+    Find document(s) by filename with FULL extracted fields and confidence scores.
 
     Supports both exact and partial filename matching.
+    Automatically includes all extracted fields with confidence scores for each match.
 
     Args:
         filename: Filename to search for
         exact_match: If True, requires exact match; if False, uses partial matching
 
     Returns:
-        List of matching documents with basic metadata
+        List of matching documents with:
+        - Document metadata (filename, status, template)
+        - ALL extracted fields with confidence scores
+        - Verification status for each field
 
     Examples:
         >>> get_document_by_filename("invoice_2024.pdf", exact_match=True)
@@ -200,11 +204,23 @@ async def get_document_by_filename(
             results = [doc for doc in results if doc["filename"] == filename]
             total = len(results)
 
+        # Enrich results with full field details (including confidence scores)
+        enriched_results = []
+        for doc in results:
+            # Get full document details with all fields and confidence scores
+            full_doc = await db_service.get_document(doc["id"])
+            if full_doc:
+                enriched_results.append(full_doc)
+            else:
+                # Fallback to basic metadata if full details unavailable
+                enriched_results.append(doc)
+
         return {
-            "matches": results,
+            "matches": enriched_results,  # Now includes full field details!
             "total": total,
             "filename": filename,
-            "exact_match": exact_match
+            "exact_match": exact_match,
+            "note": "All matches include extracted fields with confidence scores"
         }
 
     except Exception as e:

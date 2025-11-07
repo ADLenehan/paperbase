@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import settings
 from app.core.database import engine, Base
 from app.core.error_handlers import register_error_handlers
-from app.api import onboarding, documents, search, verification, analytics, templates, bulk_upload, rematch, extractions, folders, nl_query, audit, files, settings as settings_api, export, aggregations, mcp_search
+from app.api import onboarding, documents, search, verification, analytics, templates, bulk_upload, rematch, extractions, folders, nl_query, audit, files, settings as settings_api, export, aggregations, mcp_search, auth, users, roles, sharing, query_suggestions
 import logging
 
 # Configure logging
@@ -12,6 +12,9 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+# Enable DEBUG logging for reducto_service to see chunk structure
+logging.getLogger('app.services.reducto_service').setLevel(logging.DEBUG)
 
 # Create FastAPI app
 app = FastAPI(
@@ -34,6 +37,13 @@ app.add_middleware(
 register_error_handlers(app)
 
 # Include routers
+# Authentication & User Management (NEW)
+app.include_router(auth.router)  # Login, logout, API keys
+app.include_router(users.router)  # User management
+app.include_router(roles.router)  # Role & permission management
+app.include_router(sharing.router)  # Document sharing
+
+# Core functionality
 app.include_router(settings_api.router)  # Settings management
 app.include_router(templates.router)
 app.include_router(bulk_upload.router)  # New bulk upload flow
@@ -46,6 +56,7 @@ app.include_router(files.router)  # File serving for PDF preview
 app.include_router(export.router)  # Export functionality (CSV, Excel, JSON)
 app.include_router(aggregations.router)  # Comprehensive aggregations API
 app.include_router(mcp_search.router)  # MCP server search interface
+app.include_router(query_suggestions.router)  # Smart query suggestions
 app.include_router(onboarding.router)
 app.include_router(documents.router)
 app.include_router(search.router)
@@ -82,6 +93,18 @@ async def startup_event():
         db.close()
     except Exception as e:
         logger.error(f"Error initializing settings: {e}")
+
+    # Initialize permissions and roles
+    from app.services.permission_service import PermissionService
+
+    try:
+        db = SessionLocal()
+        permission_service = PermissionService(db)
+        permission_service.initialize_default_permissions()
+        logger.info("Permissions and roles initialized")
+        db.close()
+    except Exception as e:
+        logger.error(f"Error initializing permissions: {e}")
 
     # Seed built-in templates
     from app.api.templates import seed_builtin_templates

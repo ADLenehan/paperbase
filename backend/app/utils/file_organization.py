@@ -80,6 +80,45 @@ def organize_document_file(
         return current_path  # Return original path if move fails
 
 
+def organize_document_file_copy(
+    current_path: str,
+    filename: str,
+    template_name: Optional[str] = None
+) -> str:
+    """
+    Copy (not move) document to appropriate template folder.
+
+    This is used when multiple Documents share the same PhysicalFile via deduplication.
+    We copy instead of move to preserve the original PhysicalFile for other Documents.
+
+    Args:
+        current_path: Current path of the document
+        filename: Original filename
+        template_name: Template name for folder organization
+
+    Returns:
+        New file path after copying
+    """
+    template_folder = get_template_folder(template_name)
+    new_path = os.path.join(template_folder, filename)
+
+    # If file already exists at destination, append timestamp
+    if os.path.exists(new_path):
+        from datetime import datetime
+        timestamp = datetime.utcnow().timestamp()
+        name, ext = os.path.splitext(filename)
+        new_path = os.path.join(template_folder, f"{name}_{timestamp}{ext}")
+
+    # Copy file (preserve original)
+    try:
+        shutil.copy2(current_path, new_path)
+        logger.info(f"Copied file for organization: {filename} → {template_name or 'unmatched'}")
+        return new_path
+    except Exception as e:
+        logger.error(f"Failed to copy file {filename}: {e}")
+        return current_path  # Return original path if copy fails
+
+
 def get_template_document_count(template_name: str) -> int:
     """
     Count documents in a template folder.

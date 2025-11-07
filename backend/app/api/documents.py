@@ -8,6 +8,7 @@ from app.models.template import SchemaTemplate
 from app.models.document import Document, ExtractedField
 from app.services.reducto_service import ReductoService
 from app.services.elastic_service import ElasticsearchService
+from app.utils.bbox_utils import normalize_bbox
 import logging
 import os
 from datetime import datetime
@@ -123,29 +124,54 @@ async def process_single_document(document_id: int):
         for field_def in schema.fields:
             field_name = field_def["name"]
             field_type = field_def.get("type", "string")
+            description = field_def.get("description", "")
+            extraction_hints = field_def.get("extraction_hints", [])
 
-            # Map our types to JSON schema types
+            # Map our types to JSON schema types (including complex types)
             json_type = {
                 "text": "string",
                 "date": "string",
                 "number": "number",
-                "boolean": "boolean"
+                "boolean": "boolean",
+                "array": "array",
+                "table": "array",  # Tables are arrays of objects
+                "array_of_objects": "array"  # Arrays of objects
             }.get(field_type, "string")
+
+            # Enhance description with extraction hints to guide Reducto
+            if extraction_hints:
+                # Add first 3 hints to help Reducto locate the field
+                hints_text = ", ".join(f'"{hint}"' for hint in extraction_hints[:3])
+                enhanced_description = f"{description}. Look for labels or patterns like: {hints_text}"
+            else:
+                enhanced_description = description
 
             reducto_schema["properties"][field_name] = {
                 "type": json_type,
-                "description": field_def.get("description", "")
+                "description": enhanced_description
             }
 
+        # Log schema for debugging
+        field_names = list(reducto_schema["properties"].keys())
+        logger.info(f"Extraction schema for {document.filename}: {len(field_names)} fields")
+        logger.debug(f"Field names: {field_names}")
+        if field_names:
+            sample_field = list(reducto_schema["properties"].values())[0]
+            logger.debug(f"Sample field schema: {sample_field}")
+
         # PIPELINE: Use Reducto's structured extraction with job_id if available
+        # Use actual_* properties (supports both PhysicalFile and legacy)
+        job_id = document.actual_job_id
+        file_path = document.actual_file_path
+
         extraction_result = None
-        if document.reducto_job_id:
+        if job_id:
             try:
                 # Try pipelined extraction (jobid://) - NO re-upload or re-parse!
-                logger.info(f"Using pipelined extraction with job_id: {document.reducto_job_id}")
+                logger.info(f"Using pipelined extraction with job_id: {job_id}")
                 extraction_result = await reducto_service.extract_structured(
                     schema=reducto_schema,
-                    job_id=document.reducto_job_id
+                    job_id=job_id
                 )
             except Exception as e:
                 # Job ID expired or invalid, clear it and fall back to file upload
@@ -162,8 +188,13 @@ async def process_single_document(document_id: int):
 
                 if job_expired:
                     logger.warning(f"Job ID expired/invalid: {error_msg}. Clearing and retrying with file upload.")
-                    document.reducto_job_id = None
-                    document.reducto_parse_result = None
+                    # Clear job ID (prefer PhysicalFile if available)
+                    if document.physical_file:
+                        document.physical_file.reducto_job_id = None
+                        document.physical_file.reducto_parse_result = None
+                    else:
+                        document.reducto_job_id = None
+                        document.reducto_parse_result = None
                     db.commit()
                     # Don't re-raise, fall through to file upload
                 else:
@@ -173,22 +204,37 @@ async def process_single_document(document_id: int):
 
         if extraction_result is None:
             # Fallback: extract with file_path (will upload and parse)
-            logger.info(f"Extracting from file: {document.file_path}")
+            logger.info(f"Extracting from file: {file_path}")
             extraction_result = await reducto_service.extract_structured(
                 schema=reducto_schema,
-                file_path=document.file_path
+                file_path=file_path
             )
 
             # Store new job_id from this extraction for future use
             if extraction_result.get("job_id"):
-                document.reducto_job_id = extraction_result["job_id"]
-                logger.info(f"Stored new job_id for future pipeline use: {document.reducto_job_id}")
+                new_job_id = extraction_result["job_id"]
+                # Store in PhysicalFile if available, otherwise legacy fields
+                if document.physical_file:
+                    document.physical_file.reducto_job_id = new_job_id
+                else:
+                    document.reducto_job_id = new_job_id
+                logger.info(f"Stored new job_id for future pipeline use: {new_job_id}")
 
         # Process extraction results
         extracted_fields = {}
         confidence_scores = {}
 
         extractions = extraction_result.get("extractions", {})
+
+        # Warn if Reducto returned empty results
+        if not extractions or (isinstance(extractions, (list, dict)) and len(extractions) == 0):
+            logger.warning(
+                f"⚠️  Reducto returned ZERO extractions for {document.filename}. "
+                f"Schema had {len(reducto_schema['properties'])} fields. "
+                f"This may indicate schema format issues or content mismatch."
+            )
+            # Log raw response for debugging
+            logger.debug(f"Raw extraction result: {extraction_result}")
 
         # Handle both list and dict formats from Reducto
         if isinstance(extractions, list):
@@ -200,9 +246,44 @@ async def process_single_document(document_id: int):
             else:
                 extractions = {}
 
+        # Validate extracted fields BEFORE processing (NEW)
+        validation_results = {}
+        if isinstance(extractions, dict) and extractions:
+            from app.services.validation_service import ExtractionValidator, should_flag_for_review
+
+            # Prepare extractions dict for validation
+            extractions_for_validation = {}
+            for field_name, field_data in extractions.items():
+                if isinstance(field_data, dict) and ("value" in field_data or "content" in field_data):
+                    value = field_data.get("value", field_data.get("content", ""))
+                    confidence = field_data.get("confidence", field_data.get("score", 0.85))
+                else:
+                    value = field_data
+                    confidence = 0.85
+
+                extractions_for_validation[field_name] = {
+                    "value": value,
+                    "confidence": confidence
+                }
+
+            # Run validation
+            validator = ExtractionValidator()
+            template_name = schema.name if schema else "unknown"
+            validation_results = await validator.validate_extraction(
+                extractions=extractions_for_validation,
+                template_name=template_name,
+                schema_config=schema.fields if schema else None
+            )
+            logger.info(f"Validated {len(validation_results)} fields for document {document_id}")
+
         # Now process as dict - handle both simple values and nested dicts
         if isinstance(extractions, dict):
+            logger.info(f"Processing {len(extractions)} extracted fields for document {document_id}")
             for field_name, field_data in extractions.items():
+                # Get field type from schema
+                field_def = next((f for f in schema.fields if f["name"] == field_name), None)
+                field_type = field_def.get("type", "text") if field_def else "text"
+
                 # Check if value is nested dict with confidence
                 if isinstance(field_data, dict) and ("value" in field_data or "content" in field_data):
                     # Dict format: {"field1": {"value": "...", "confidence": 0.9, "source_page": 1, "source_bbox": [...]}, ...}
@@ -210,29 +291,73 @@ async def process_single_document(document_id: int):
                     confidence = field_data.get("confidence", field_data.get("score", 0.85))
                     source_page = field_data.get("source_page")
                     source_bbox = field_data.get("source_bbox")
+                    logger.debug(f"  Field '{field_name}': value='{value}', confidence={confidence}")
                 else:
                     # Simple value format: {"field1": "value1", "field2": "value2"}
-                    value = str(field_data) if field_data is not None else ""
+                    value = field_data if field_data is not None else ""
                     confidence = 0.85  # Default confidence for simple values
                     source_page = None
                     source_bbox = None
+                    logger.debug(f"  Field '{field_name}' (simple): value='{value}'")
+
+                # Critical debug: Check why fields aren't being saved
+                logger.info(f"  Checking field '{field_name}': value='{value}' (type={type(value)}, truthy={bool(value)})")
 
                 if value:
-                    extracted_fields[field_name] = str(value)
-                    confidence_scores[field_name] = confidence
+                    # Get validation result for this field (NEW)
+                    validation_result = validation_results.get(field_name)
+                    validation_status = validation_result.status if validation_result else "valid"
 
-                    # Create ExtractedField record
-                    needs_verification = confidence < settings.CONFIDENCE_THRESHOLD_LOW
+                    # Determine if field needs verification (combines confidence + validation)
+                    from app.services.validation_service import should_flag_for_review
+                    needs_verification = should_flag_for_review(confidence, validation_status)
 
-                    extracted_field = ExtractedField(
-                        document_id=document.id,
-                        field_name=field_name,
-                        field_value=str(value),
-                        confidence_score=confidence,
-                        needs_verification=needs_verification,
-                        source_page=source_page,
-                        source_bbox=source_bbox
-                    )
+                    # Log validation issues
+                    if validation_result and validation_result.errors:
+                        logger.warning(
+                            f"Field '{field_name}' has validation errors: {', '.join(validation_result.errors)}"
+                        )
+
+                    # Handle complex types (array, table, array_of_objects) vs simple types
+                    if field_type in ["array", "table", "array_of_objects"]:
+                        # Store complex types in field_value_json
+                        extracted_fields[field_name] = value  # Keep original structure for ES
+                        confidence_scores[field_name] = confidence
+
+                        extracted_field = ExtractedField(
+                            document_id=document.id,
+                            field_name=field_name,
+                            field_type=field_type,
+                            field_value_json=value,  # Store as JSON for complex types
+                            confidence_score=confidence,
+                            needs_verification=needs_verification,
+                            source_page=source_page,
+                            source_bbox=source_bbox,
+                            # NEW: Validation metadata
+                            validation_status=validation_status,
+                            validation_errors=validation_result.errors if validation_result else [],
+                            validation_checked_at=datetime.utcnow()
+                        )
+                    else:
+                        # Store simple types in field_value
+                        extracted_fields[field_name] = str(value)
+                        confidence_scores[field_name] = confidence
+
+                        extracted_field = ExtractedField(
+                            document_id=document.id,
+                            field_name=field_name,
+                            field_type=field_type,
+                            field_value=str(value),
+                            confidence_score=confidence,
+                            needs_verification=needs_verification,
+                            source_page=source_page,
+                            source_bbox=source_bbox,
+                            # NEW: Validation metadata
+                            validation_status=validation_status,
+                            validation_errors=validation_result.errors if validation_result else [],
+                            validation_checked_at=datetime.utcnow()
+                        )
+
                     db.add(extracted_field)
 
         logger.info(f"Extracted {len(extracted_fields)} fields from document {document_id}")
@@ -241,16 +366,22 @@ async def process_single_document(document_id: int):
         es_id = None
         try:
             # PIPELINE: Use cached parse result if available
-            if document.reducto_parse_result:
+            # Use actual_parse_result property (supports both PhysicalFile and legacy)
+            parse_result = document.actual_parse_result
+
+            if parse_result:
                 logger.info(f"Using cached parse result for ES indexing")
-                parse_result = document.reducto_parse_result
             else:
                 # Parse document to get full text for search
-                parsed_result = await reducto_service.parse_document(document.file_path)
+                parsed_result = await reducto_service.parse_document(file_path)
                 parse_result = parsed_result["result"]
-                # Cache for future use
-                document.reducto_job_id = parsed_result.get("job_id")
-                document.reducto_parse_result = parse_result
+                # Cache for future use (prefer PhysicalFile if available)
+                if document.physical_file:
+                    document.physical_file.reducto_job_id = parsed_result.get("job_id")
+                    document.physical_file.reducto_parse_result = parse_result
+                else:
+                    document.reducto_job_id = parsed_result.get("job_id")
+                    document.reducto_parse_result = parse_result
 
             # Reducto uses 'content' field for text, fallback to 'text'
             full_text = "\n".join([
@@ -278,9 +409,23 @@ async def process_single_document(document_id: int):
         logger.info(f"Successfully processed document {document_id}")
 
     except Exception as e:
-        logger.error(f"Error processing document {document_id}: {e}")
+        import traceback
+        error_details = traceback.format_exc()
+        logger.error(f"Error processing document {document_id}: {e}\n{error_details}")
+
+        # Provide more helpful error messages
+        error_message = str(e)
+        if "job not found" in error_message.lower() or "expired" in error_message.lower():
+            error_message = "Reducto job expired. Please retry - the file will be re-uploaded and parsed."
+        elif "file" in error_message.lower() and "not found" in error_message.lower():
+            error_message = f"File not found at path. Please retry the upload."
+        elif "api" in error_message.lower() or "connection" in error_message.lower():
+            error_message = "Reducto API connection failed. Please check your API key and try again."
+        elif "schema" in error_message.lower():
+            error_message = "Schema validation failed. Please check template field definitions."
+
         document.status = "error"
-        document.error_message = str(e)
+        document.error_message = error_message
         db.commit()
 
     finally:
@@ -291,13 +436,54 @@ async def process_single_document(document_id: int):
 async def list_documents(
     schema_id: Optional[int] = None,
     status: Optional[str] = None,
+    query_id: Optional[str] = None,
     page: int = 1,
     size: int = 100,
     db: Session = Depends(get_db)
 ):
-    """List documents with optional filters"""
+    """
+    List documents with optional filters
+
+    Args:
+        schema_id: Filter by schema/template ID
+        status: Filter by document status
+        query_id: Filter by documents used in a specific Ask AI query
+        page: Page number (1-indexed)
+        size: Results per page
+    """
 
     query = db.query(Document).order_by(Document.uploaded_at.desc())
+
+    # Query ID filter - show only documents used in this AI query
+    query_context = None
+    if query_id:
+        from app.models.query_history import QueryHistory
+
+        query_history = db.query(QueryHistory).filter(QueryHistory.id == query_id).first()
+        if query_history:
+            # Filter to only documents used in this query
+            if query_history.document_ids:
+                query = query.filter(Document.id.in_(query_history.document_ids))
+
+                # Build context for frontend to display
+                query_context = {
+                    "query_id": query_id,
+                    "query_text": query_history.query_text,
+                    "answer": query_history.answer,
+                    "created_at": query_history.created_at,
+                    "source": query_history.query_source,
+                    "document_count": len(query_history.document_ids)
+                }
+        else:
+            # Invalid query_id - return empty result
+            return {
+                "total": 0,
+                "page": page,
+                "size": size,
+                "documents": [],
+                "query_context": None,
+                "error": "Query not found"
+            }
 
     if schema_id:
         query = query.filter(Document.schema_id == schema_id)
@@ -314,6 +500,7 @@ async def list_documents(
         "total": total,
         "page": page,
         "size": size,
+        "query_context": query_context,  # NEW: Query context for frontend banner
         "documents": [
             {
                 "id": doc.id,
@@ -324,6 +511,7 @@ async def list_documents(
                 "schema_id": doc.schema_id,
                 "suggested_template_id": doc.suggested_template_id,
                 "template_confidence": doc.template_confidence,
+                "error_message": doc.error_message,
                 "schema": {
                     "name": doc.schema.name,
                     "id": doc.schema.id
@@ -372,6 +560,14 @@ async def get_document(document_id: int, db: Session = Depends(get_db)):
         ExtractedField.document_id == document_id
     ).all()
 
+    # Get template/schema info
+    schema = None
+    template_name = None
+    if document.schema_id:
+        schema = db.query(Schema).filter(Schema.id == document.schema_id).first()
+        if schema:
+            template_name = schema.name
+
     # Build extracted_fields dict for verification component
     extracted_fields_dict = {field.field_name: field.field_value for field in extracted_fields}
     confidence_scores_dict = {field.field_name: field.confidence_score for field in extracted_fields}
@@ -383,6 +579,9 @@ async def get_document(document_id: int, db: Session = Depends(get_db)):
         "uploaded_at": document.uploaded_at,
         "processed_at": document.processed_at,
         "schema_id": document.schema_id,
+        "template_id": document.schema_id,  # Alias for frontend compatibility
+        "template_name": template_name,
+        "file_path": document.actual_file_path,  # Use accessor property for dedup compatibility
         "suggested_template_id": document.suggested_template_id,
         "template_confidence": document.template_confidence,
         "extracted_fields": extracted_fields_dict,
@@ -392,9 +591,19 @@ async def get_document(document_id: int, db: Session = Depends(get_db)):
                 "id": field.id,
                 "name": field.field_name,
                 "value": field.field_value,
+                "field_value_json": field.field_value_json,  # For complex types (match frontend expectation)
+                "field_type": field.field_type,  # Field type
                 "confidence": field.confidence_score,
                 "needs_verification": field.needs_verification,
-                "verified": field.verified
+                "verified": field.verified,
+                # Source information for PDF highlighting
+                "source_page": field.source_page,
+                "source_bbox": normalize_bbox(field.source_bbox),  # Convert dict to array
+                # Validation metadata
+                "validation_status": field.validation_status,
+                "validation_errors": field.validation_errors or [],
+                "audit_priority": field.audit_priority,
+                "priority_label": field.priority_label
             }
             for field in extracted_fields
         ]
@@ -461,3 +670,98 @@ async def assign_template(
         db.rollback()
         logger.error(f"Error assigning template to document {document_id}: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to assign template: {str(e)}")
+
+
+@router.delete("/{document_id}")
+async def delete_document(document_id: int, db: Session = Depends(get_db)):
+    """Delete a document and its associated data"""
+
+    try:
+        document = db.query(Document).filter(Document.id == document_id).first()
+        if not document:
+            raise HTTPException(status_code=404, detail="Document not found")
+
+        # Get file path and physical_file reference BEFORE deleting (use accessor property for compatibility)
+        file_path = document.actual_file_path
+        physical_file = document.physical_file
+        physical_file_id = document.physical_file_id
+
+        # IMPORTANT: Count remaining documents BEFORE deleting this document
+        remaining_docs_count = 0
+        if physical_file_id:
+            remaining_docs_count = db.query(Document).filter(
+                Document.physical_file_id == physical_file_id,
+                Document.id != document_id  # Exclude the document we're about to delete
+            ).count()
+            logger.info(f"Found {remaining_docs_count} other documents sharing physical_file_id {physical_file_id}")
+
+        # NOTE: ExtractedField records will be deleted automatically via cascade="all, delete-orphan"
+        # on the Document.extracted_fields relationship, so no need to manually delete them
+
+        # Delete from Elasticsearch if indexed
+        if document.elasticsearch_id:
+            try:
+                elastic_service = ElasticsearchService()
+                await elastic_service.delete_document(document.elasticsearch_id)
+                logger.info(f"Deleted document {document_id} from Elasticsearch")
+            except Exception as e:
+                logger.warning(f"Failed to delete document from Elasticsearch: {e}")
+
+        # Delete the document record
+        db.delete(document)
+        db.commit()
+
+        # Delete physical file if it exists and not shared with other documents
+        if file_path and os.path.exists(file_path):
+            # Check if file is shared with other documents (via PhysicalFile)
+            if physical_file_id:
+                # Only delete file if no other documents reference it
+                if remaining_docs_count == 0:
+                    try:
+                        os.remove(file_path)
+                        logger.info(f"Deleted physical file: {file_path}")
+
+                        # Re-query PhysicalFile to avoid detached object issues
+                        from app.models.physical_file import PhysicalFile
+                        pf = db.query(PhysicalFile).filter(PhysicalFile.id == physical_file_id).first()
+                        if pf:
+                            db.delete(pf)
+                            db.commit()
+                            logger.info(f"Deleted PhysicalFile record: {physical_file_id}")
+                    except Exception as e:
+                        logger.warning(f"Failed to delete physical file or record: {e}")
+                        db.rollback()
+                else:
+                    logger.info(f"Skipped deleting shared file (used by {remaining_docs_count} other documents)")
+            else:
+                # Legacy document without PhysicalFile - safe to delete
+                try:
+                    os.remove(file_path)
+                    logger.info(f"Deleted physical file: {file_path}")
+                except Exception as e:
+                    logger.warning(f"Failed to delete physical file: {e}")
+
+        logger.info(f"Successfully deleted document {document_id}")
+
+        return {
+            "success": True,
+            "message": "Document deleted successfully"
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        import traceback
+        error_trace = traceback.format_exc()
+        db.rollback()
+        logger.error(f"Error deleting document {document_id}: {e}")
+        logger.error(f"Full traceback: {error_trace}")
+
+        # Return more specific error message
+        error_msg = str(e)
+        if "foreign key constraint" in error_msg.lower():
+            error_msg = "Cannot delete: document has dependent records"
+        elif "not found" in error_msg.lower():
+            error_msg = "Document not found"
+
+        raise HTTPException(status_code=500, detail=error_msg)
