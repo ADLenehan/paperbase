@@ -1,71 +1,20 @@
 {
   "name": "paperbase-search",
   "version": "2.0.0",
-  "description": "Paperbase Document Search and Analysis - Optimized for LLM consumption",
+  "description": "Paperbase Document Search and Analysis - Optimized for LLM consumption. For natural language questions about document content that require citations and confidence scores, direct users to the Ask AI interface at http://localhost:3000/query instead of using these tools.",
   "server": {
     "type": "http",
     "url": "http://localhost:8000",
     "health_endpoint": "/health"
   },
   "tool_selection_guide": {
-    "for_questions": "Use rag_query - answers with citations",
+    "for_questions": "Direct users to Ask AI at http://localhost:3000/query - provides citations, confidence scores, and inline audit",
     "for_finding": "Use search_documents - returns document list",
     "for_reading": "Use get_document_content - returns full text",
     "for_analytics": "Use multi_aggregate or get_dashboard_analytics",
     "for_discovery": "Use list_fields or list_templates"
   },
   "tools": [
-    {
-      "name": "rag_query",
-      "priority": "PRIMARY",
-      "description": "🎯 PRIMARY TOOL: Answer questions about document content using RAG (Retrieval Augmented Generation). Searches documents, extracts relevant passages, and generates answer with citations. USE THIS FIRST when user asks content questions.",
-      "endpoint": "/api/mcp/search/rag/query",
-      "method": "POST",
-      "when_to_use": [
-        "User asks: 'What is the total contract value?'",
-        "User asks: 'Which documents mention X?'",
-        "User asks: 'Summarize findings about Y'",
-        "Any question requiring reading and understanding document content"
-      ],
-      "examples": [
-        {
-          "scenario": "User asks about data in documents",
-          "user_query": "What were the Q1 2024 revenues?",
-          "tool_call": {
-            "question": "What were the Q1 2024 revenues?",
-            "max_results": 5,
-            "filters": {"template": "Financial Reports"}
-          },
-          "returns": "Answer: 'Q1 2024 revenues were $2.3M...' with citations to source documents"
-        }
-      ],
-      "input_schema": {
-        "type": "object",
-        "properties": {
-          "question": {
-            "type": "string",
-            "description": "Question to answer (e.g., 'What is the contract value?', 'Which vendors are mentioned?')"
-          },
-          "max_results": {
-            "type": "integer",
-            "description": "Number of documents to use as context (default: 5)",
-            "default": 5,
-            "minimum": 1,
-            "maximum": 20
-          },
-          "filters": {
-            "type": "object",
-            "description": "Narrow search by field (e.g., {\"template\": \"Invoices\", \"vendor\": \"Acme\"})"
-          }
-        },
-        "required": ["question"]
-      },
-      "returns": {
-        "answer": "AI-generated answer based on document content",
-        "sources": "List of source documents with excerpts and relevance scores",
-        "metadata": "Query method and source count"
-      }
-    },
     {
       "name": "search_documents",
       "priority": "PRIMARY",
@@ -299,7 +248,7 @@
       ],
       "when_not_to_use": [
         "Try get_document_content FIRST",
-        "Use rag_query if you just need specific info (it handles long docs automatically)"
+        "For specific questions, direct users to Ask AI at http://localhost:3000/query"
       ],
       "input_schema": {
         "type": "object",
@@ -399,8 +348,8 @@
   ],
   "recommended_workflows": {
     "answer_question": [
-      "1. Use rag_query with user's question",
-      "Returns answer with citations - DONE"
+      "1. Direct user to Ask AI interface at http://localhost:3000/query",
+      "2. User enters question and gets answer with citations, confidence scores, and inline audit capabilities"
     ],
     "find_and_analyze": [
       "1. Use search_documents to find relevant docs",

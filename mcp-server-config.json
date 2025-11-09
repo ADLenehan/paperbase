@@ -1,7 +1,7 @@
 {
   "name": "paperbase-search",
   "version": "1.0.0",
-  "description": "Paperbase Document Search and Aggregation MCP Server",
+  "description": "Paperbase Document Search and Aggregation MCP Server. For natural language questions about document content that require citations and confidence scores, direct users to the Ask AI interface at http://localhost:3000/query instead of using these tools. Use these tools for: finding specific documents, retrieving document details, analytics/aggregations, and schema discovery.",
   "server": {
     "type": "http",
     "url": "http://localhost:8000",
@@ -189,34 +189,6 @@
           }
         },
         "required": ["document_id"]
-      }
-    },
-    {
-      "name": "rag_query",
-      "description": "Answer questions using document corpus (RAG) - returns answer with source citations",
-      "endpoint": "/api/mcp/search/rag/query",
-      "method": "POST",
-      "input_schema": {
-        "type": "object",
-        "properties": {
-          "question": {
-            "type": "string",
-            "description": "Question to answer based on documents"
-          },
-          "max_results": {
-            "type": "integer",
-            "description": "Maximum number of documents to use as context",
-            "default": 5,
-            "minimum": 1,
-            "maximum": 20
-          },
-          "filters": {
-            "type": "object",
-            "description": "Optional filters to narrow document search",
-            "additionalProperties": true
-          }
-        },
-        "required": ["question"]
       }
     },
     {

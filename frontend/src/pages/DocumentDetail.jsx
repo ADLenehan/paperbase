@@ -10,15 +10,16 @@ import apiClient from '../api/client';
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
 /**
- * DocumentDetail - Full-page document detail view with split layout
+ * DocumentDetail - Full-page document detail view with vertical layout
  *
  * Layout:
- * - Left panel (40%): List of all extracted fields with metadata
- * - Right panel (60%): PDF viewer with bbox highlighting
+ * - Top section (60%): PDF/Image viewer with bbox highlighting
+ * - Bottom section (40%): List of all extracted fields with metadata
  *
  * Features:
  * - Click field card → highlight in PDF
  * - Click "View Citation" → jump to that page/bbox
+ * - Inline editing with optimistic UI updates
  * - Quick verify without leaving page
  * - Export, Edit, Audit actions in header
  */
@@ -48,6 +49,9 @@ export default function DocumentDetail() {
   // Export modal
   const [showExportModal, setShowExportModal] = useState(false);
 
+  // Mark as verified
+  const [markingVerified, setMarkingVerified] = useState(false);
+
   // Refs for scrolling
   const fieldsContainerRef = useRef(null);
   const pdfViewerRef = useRef(null);
@@ -68,6 +72,9 @@ export default function DocumentDetail() {
       }
 
       const data = await response.json();
+      console.log('Document loaded:', data);
+      console.log('Document file_path:', data.file_path);
+      console.log('PDF URL will be:', `${API_URL}/api/files/${documentId}/preview`);
       setDocument(data);
     } catch (err) {
       console.error('Error fetching document:', err);
@@ -92,8 +99,9 @@ export default function DocumentDetail() {
 
   const handleVerifyField = (field) => {
     // Open audit modal for this field
+    // Filter by BOTH confidence AND verified status (exclude already-verified fields)
     const lowConfidenceFields = document.fields
-      .filter(f => f.confidence < thresholds.audit)
+      .filter(f => f.confidence < thresholds.audit && !f.verified)
       .sort((a, b) => a.confidence - b.confidence);
 
     const startIndex = lowConfidenceFields.findIndex(f => f.id === field.id);
@@ -144,6 +152,66 @@ export default function DocumentDetail() {
     }
   };
 
+  // NEW: Inline field save handler with optimistic UI updates
+  const handleFieldSave = async (fieldId, newValue) => {
+    try {
+      // Find the field to determine the correct action
+      const field = document.fields.find(f => f.id === fieldId);
+
+      if (!field) {
+        throw new Error('Field not found');
+      }
+
+      // Determine action based on original value
+      let action;
+      const originalValue = field.value;
+
+      if (!originalValue || originalValue === '' || originalValue === null) {
+        // User is filling in a missing value
+        action = 'not_found';
+      } else if (originalValue !== newValue) {
+        // User is correcting an incorrect extraction
+        action = 'incorrect';
+      } else {
+        // No change, skip save
+        return;
+      }
+
+      // OPTIMISTIC UPDATE: Update UI immediately for perceived speed
+      // Also mark as verified since the backend will do this
+      setDocument(prev => ({
+        ...prev,
+        fields: prev.fields.map(f =>
+          f.id === fieldId ? { ...f, value: newValue, verified: true } : f
+        )
+      }));
+
+      try {
+        // Use audit verification API with intelligent action detection
+        await apiClient.post('/api/audit/verify', {
+          field_id: fieldId,
+          action: action,
+          corrected_value: newValue,
+          notes: `Inline edit from document view (${action})`
+        });
+
+        // Refresh document data to get server updates (confidence, verified flag, etc.)
+        await fetchDocument();
+
+        // Optional: Show success feedback
+        // You could add a toast notification here if you have a toast library
+      } catch (error) {
+        // Revert optimistic update on error
+        await fetchDocument();
+        throw error;
+      }
+    } catch (error) {
+      console.error('Failed to save field:', error);
+      // Re-throw so FieldCard can show error
+      throw error;
+    }
+  };
+
   const handleNextField = async () => {
     const nextIndex = auditIndex + 1;
     if (nextIndex < auditQueue.length) {
@@ -156,6 +224,38 @@ export default function DocumentDetail() {
 
   const handleOpenAudit = () => {
     navigate(`/audit/document/${documentId}`);
+  };
+
+  // NEW: Mark document as verified
+  const handleMarkVerified = async () => {
+    // Check if any fields need verification
+    const needsReview = document.fields.filter(f =>
+      f.confidence < thresholds.audit && !f.verified
+    );
+
+    if (needsReview.length > 0) {
+      const confirmed = window.confirm(
+        `This document has ${needsReview.length} field(s) that need review. ` +
+        `Mark as verified anyway?`
+      );
+      if (!confirmed) return;
+    }
+
+    setMarkingVerified(true);
+    try {
+      await apiClient.post(`/api/documents/${documentId}/verify`, {
+        force: needsReview.length > 0
+      });
+
+      await fetchDocument();
+      // Optional: Show success message
+      alert('Document marked as verified!');
+    } catch (error) {
+      console.error('Failed to verify document:', error);
+      alert('Failed to verify document. Please try again.');
+    } finally {
+      setMarkingVerified(false);
+    }
   };
 
   const getFilteredFields = () => {
@@ -290,6 +390,35 @@ export default function DocumentDetail() {
 
           {/* Action buttons */}
           <div className="flex items-center gap-2 ml-4">
+            {/* Mark as Verified button */}
+            <button
+              onClick={handleMarkVerified}
+              disabled={markingVerified || document.status === 'verified'}
+              className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors flex items-center gap-2 ${
+                needsReviewCount > 0
+                  ? 'bg-yellow-100 text-yellow-700 border border-yellow-300 hover:bg-yellow-200'
+                  : document.status === 'verified'
+                  ? 'bg-periwinkle-100 text-periwinkle-700 border border-periwinkle-300 cursor-not-allowed'
+                  : 'bg-periwinkle-500 text-white hover:bg-periwinkle-600'
+              } ${markingVerified ? 'opacity-50 cursor-wait' : ''}`}
+            >
+              {markingVerified ? (
+                <>
+                  <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                  </svg>
+                  Verifying...
+                </>
+              ) : document.status === 'verified' ? (
+                <>✓ Verified</>
+              ) : needsReviewCount > 0 ? (
+                <>⚠ Mark Verified ({needsReviewCount} need review)</>
+              ) : (
+                <>✓ Mark as Verified</>
+              )}
+            </button>
+
             <button
               onClick={() => setShowExportModal(true)}
               className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
@@ -300,18 +429,60 @@ export default function DocumentDetail() {
               onClick={handleOpenAudit}
               className="px-4 py-2 text-sm font-medium text-white bg-periwinkle-500 rounded-lg hover:bg-periwinkle-600 transition-colors"
             >
-              Open Audit
+              Open Audit{needsReviewCount > 0 && ` (${needsReviewCount})`}
             </button>
           </div>
         </div>
       </div>
 
-      {/* Main content: Split view */}
-      <div className="flex-1 flex overflow-hidden">
-        {/* Left panel: Fields list */}
-        <div className="w-2/5 border-r border-gray-200 flex flex-col bg-white">
+      {/* Main content: Vertical layout (preview on top, fields below) */}
+      <div className="flex-1 flex flex-col overflow-hidden">
+        {/* Top section: PDF/Image viewer with bbox highlighting */}
+        <div className="h-3/5 border-b border-gray-200 bg-gray-100">
+          <div className="h-full overflow-hidden">
+            {document.file_path ? (
+              // Check if file is an image or PDF
+              document.filename && /\.(png|jpg|jpeg|gif|webp)$/i.test(document.filename) ? (
+                // Image viewer
+                <div className="h-full overflow-auto p-4 flex items-center justify-center bg-gray-50">
+                  <img
+                    src={`${API_URL}/api/files/${documentId}/preview`}
+                    alt={document.filename}
+                    className="max-w-full max-h-full object-contain shadow-lg"
+                  />
+                </div>
+              ) : (
+                // PDF viewer with bbox highlighting
+                <PDFViewer
+                  ref={pdfViewerRef}
+                  fileUrl={`${API_URL}/api/files/${documentId}/preview`}
+                  page={currentPage}
+                  highlights={highlightedBbox ? [{
+                    bbox: highlightedBbox,
+                    color: 'blue',
+                    label: 'Selected field',
+                    page: highlightedBbox.page || currentPage
+                  }] : []}
+                  onPageChange={setCurrentPage}
+                />
+              )
+            ) : (
+              <div className="flex items-center justify-center h-full text-gray-500">
+                <div className="text-center">
+                  <svg className="w-16 h-16 mx-auto mb-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                  </svg>
+                  <p className="text-sm">No file available</p>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Bottom section: Fields list */}
+        <div className="h-2/5 flex flex-col bg-white overflow-hidden">
           {/* Fields header + filters */}
-          <div className="px-6 py-4 border-b border-gray-200">
+          <div className="px-6 py-4 border-b border-gray-200 flex-shrink-0">
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-lg font-semibold text-gray-900">
                 Extracted Fields ({document.fields?.length || 0})
@@ -373,7 +544,7 @@ export default function DocumentDetail() {
             </div>
           </div>
 
-          {/* Fields list */}
+          {/* Fields list - scrollable */}
           <div ref={fieldsContainerRef} className="flex-1 overflow-y-auto p-6 space-y-3">
             {filteredFields.length === 0 ? (
               <div className="text-center py-12 text-gray-500">
@@ -384,34 +555,12 @@ export default function DocumentDetail() {
                 <FieldCard
                   key={field.id}
                   field={field}
+                  editable={true}
+                  onSave={handleFieldSave}
                   onViewCitation={handleViewCitation}
                   onVerify={handleVerifyField}
                 />
               ))
-            )}
-          </div>
-        </div>
-
-        {/* Right panel: PDF viewer */}
-        <div className="flex-1 bg-gray-100 flex flex-col">
-          <div className="flex-1 overflow-hidden">
-            {document.file_path ? (
-              <PDFViewer
-                ref={pdfViewerRef}
-                filePath={document.file_path}
-                currentPage={currentPage}
-                highlightedBbox={highlightedBbox}
-                onPageChange={setCurrentPage}
-              />
-            ) : (
-              <div className="flex items-center justify-center h-full text-gray-500">
-                <div className="text-center">
-                  <svg className="w-16 h-16 mx-auto mb-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                  </svg>
-                  <p className="text-sm">No PDF available</p>
-                </div>
-              </div>
             )}
           </div>
         </div>

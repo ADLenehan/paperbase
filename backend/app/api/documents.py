@@ -765,3 +765,98 @@ async def delete_document(document_id: int, db: Session = Depends(get_db)):
             error_msg = "Document not found"
 
         raise HTTPException(status_code=500, detail=error_msg)
+
+
+@router.post("/{document_id}/verify")
+async def mark_document_verified(
+    document_id: int,
+    request: dict,
+    db: Session = Depends(get_db)
+):
+    """
+    Mark a document as verified.
+
+    This endpoint allows users to mark a document as verified/approved
+    for use, even if some fields have low confidence scores.
+
+    Args:
+        document_id: ID of the document to verify
+        request: { "force": bool } - If true, verify even if fields need review
+
+    Returns:
+        Success status and updated document status
+    """
+    try:
+        # Get document from database
+        document = db.query(Document).filter(Document.id == document_id).first()
+        if not document:
+            raise HTTPException(status_code=404, detail="Document not found")
+
+        # Check if force flag is needed
+        force = request.get("force", False)
+
+        # Count fields that need review (if any)
+        from app.models.settings import Settings
+        audit_threshold_setting = db.query(Settings).filter(
+            Settings.key == "audit_confidence_threshold",
+            Settings.level == "system"
+        ).first()
+
+        audit_threshold = float(audit_threshold_setting.value) if audit_threshold_setting else 0.6
+
+        # Get all fields for this document
+        fields = db.query(ExtractedField).filter(
+            ExtractedField.document_id == document_id
+        ).all()
+
+        needs_review_count = sum(
+            1 for field in fields
+            if field.confidence_score and field.confidence_score < audit_threshold and not field.verified
+        )
+
+        # If fields need review and force is not set, return error
+        if needs_review_count > 0 and not force:
+            raise HTTPException(
+                status_code=400,
+                detail=f"{needs_review_count} fields need review before verification"
+            )
+
+        # Update document status to verified
+        document.status = "verified"
+        document.processed_at = datetime.utcnow()
+
+        db.commit()
+
+        # Update Elasticsearch to keep status in sync
+        try:
+            elastic_service = ElasticsearchService()
+            await elastic_service.update_document(
+                doc_id=document.elasticsearch_id,
+                updates={"status": "verified"}
+            )
+            logger.info(f"Updated ES status for document {document_id} to verified")
+        except Exception as e:
+            logger.warning(
+                f"Failed to update ES status for document {document_id}: {e}. "
+                "SQLite updated successfully, ES will be eventually consistent."
+            )
+            # Don't fail the whole request - SQLite is source of truth, ES is secondary
+
+        logger.info(
+            f"Document {document_id} marked as verified "
+            f"({needs_review_count} fields needed review, force={force})"
+        )
+
+        return {
+            "success": True,
+            "message": "Document marked as verified",
+            "status": "verified",
+            "fields_needing_review": needs_review_count
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Error verifying document {document_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))

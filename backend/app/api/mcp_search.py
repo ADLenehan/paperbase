@@ -207,7 +207,7 @@ async def search_documents_mcp(request: MCPSearchRequest):
 
                 enhanced_response["next_steps"] = {
                     "to_read_content": f"Call get_document_content({cleaned_documents[0]['id']}) to read the full text",
-                    "to_answer_question": "Call rag_query with a specific question about these documents",
+                    "to_answer_question": "Direct user to Ask AI interface at http://localhost:3000/query for natural language questions",
                     "to_analyze": "Call multi_aggregate to calculate statistics across results"
                 }
             else:
@@ -549,7 +549,7 @@ async def get_document_content_mcp(document_id: int):
             "next_steps": {
                 "to_analyze": "Process this content with your analysis logic",
                 "to_chunk": f"If content is too long, use get_document_chunks({document_id}) for paginated access",
-                "to_ask_question": "Use rag_query to ask specific questions about this document"
+                "to_ask_question": "Direct user to Ask AI interface at http://localhost:3000/query for natural language questions"
             }
         }
 
@@ -662,256 +662,25 @@ async def get_document_chunks_mcp(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/rag/query")
-async def rag_query_mcp(
-    question: str = Query(..., description="Question to answer"),
-    max_results: int = Query(default=5, ge=1, le=20, description="Max documents to use as context"),
-    filters: Optional[Dict[str, Any]] = None
-):
-    """
-    Answer a question using the document corpus (RAG - Retrieval Augmented Generation).
-
-    This tool searches the document corpus for relevant information and uses it
-    to generate an answer grounded in actual document content.
-
-    **How it works:**
-    1. Search for relevant documents matching the question
-    2. Extract text from top matching documents
-    3. Send question + context to Claude for answering
-    4. Return answer with source citations
-
-    **Use Cases:**
-    - Question answering grounded in documents
-    - Research and discovery
-    - Fact checking against corpus
-    - Summary generation with citations
-
-    **Example:**
-    ```
-    Question: "What were the total contract values in Q1 2024?"
-    Returns: Answer with specific values and source document references
-    ```
-    """
-
-    elastic_service = ElasticsearchService()
-    claude_service = ClaudeService()
-
-    try:
-        from app.core.database import SessionLocal
-        from app.services.schema_registry import SchemaRegistry
-
-        db = SessionLocal()
-
-        try:
-            schema_registry = SchemaRegistry(db)
-            query_optimizer = QueryOptimizer(schema_registry=schema_registry)
-            await query_optimizer.initialize_from_registry()
-
-            # Get field context
-            field_metadata_list = await schema_registry.get_all_templates_context()
-            all_field_names = []
-            combined_metadata = {"fields": {}}
-
-            for template_context in field_metadata_list:
-                all_field_names.extend(template_context.get("all_field_names", []))
-                combined_metadata["fields"].update(template_context.get("fields", {}))
-
-            all_field_names.extend([
-                "filename", "uploaded_at", "processed_at",
-                "status", "template_name", "confidence_scores", "folder_path"
-            ])
-            available_fields = list(set(all_field_names))
-
-            # Analyze query
-            query_analysis = query_optimizer.understand_query_intent(
-                query=question,
-                available_fields=available_fields
-            )
-
-            # Build ES query (use optimizer for efficiency)
-            if query_optimizer.should_use_claude(query_analysis):
-                nl_result = await claude_service.parse_natural_language_query(
-                    query=question,
-                    available_fields=available_fields,
-                    field_metadata=combined_metadata
-                )
-                es_query = nl_result.get("elasticsearch_query", {}).get("query", {})
-            else:
-                es_query = query_optimizer.build_optimized_query(
-                    query=question,
-                    analysis=query_analysis,
-                    available_fields=available_fields
-                )
-
-            # Add filters if provided
-            if filters:
-                if "bool" not in es_query:
-                    es_query = {"bool": {"must": [es_query] if es_query else [{"match_all": {}}]}}
-                if "filter" not in es_query["bool"]:
-                    es_query["bool"]["filter"] = []
-                for field, value in filters.items():
-                    es_query["bool"]["filter"].append({"term": {field: value}})
-
-            # Extract field lineage from query
-            field_lineage = extract_fields_from_es_query(es_query)
-            logger.info(f"[MCP RAG] Extracted {len(field_lineage['queried_fields'])} queried fields: {field_lineage['queried_fields']}")
-
-            # Execute search
-            search_results = await elastic_service.search(
-                query=None,
-                filters=None,
-                custom_query=es_query,
-                page=1,
-                size=max_results
-            )
-
-            # Build context from results
-            context_chunks = []
-            for doc in search_results.get("documents", []):
-                data = doc["data"]
-                # Get full text (limit to first 2000 chars per doc to avoid token limits)
-                text = data.get("full_text", "")[:2000]
-
-                context_chunks.append({
-                    "text": text,
-                    "source": data.get("filename", "Unknown"),
-                    "document_id": doc["id"],
-                    "score": doc["score"]
-                })
-
-            if not context_chunks:
-                return {
-                    "success": True,
-                    "question": question,
-                    "answer": "No relevant documents found to answer this question.",
-                    "sources": [],
-                    "confidence": "none"
-                }
-
-            # Build prompt for Claude
-            context_text = "\n\n---\n\n".join([
-                f"Document: {c['source']}\n{c['text']}"
-                for c in context_chunks
-            ])
-
-            prompt = f"""Answer the following question based ONLY on the provided documents.
-If the documents don't contain enough information to answer confidently, say so.
-Cite the specific documents you used in your answer.
-
-Documents:
-{context_text}
-
-Question: {question}
-
-Provide a clear, concise answer with citations to specific documents."""
-
-            # Get answer from Claude (with confidence metadata)
-            answer_result = await claude_service.answer_question_about_results(
-                query=question,
-                search_results=search_results.get("documents", []),
-                total_count=search_results.get("total", 0),
-                include_confidence_metadata=True
-            )
-
-            # Extract answer text for backward compatibility
-            answer = answer_result.get("answer", "No answer available.")
-
-            # NEW: Get low-confidence fields for audit metadata
-            from app.utils.audit_helpers import (
-                get_low_confidence_fields_for_documents,
-                get_confidence_summary
-            )
-
-            # Extract document IDs from search results
-            document_ids = [c["document_id"] for c in context_chunks]
-
-            # Get low-confidence fields grouped by document
-            low_conf_fields_grouped = await get_low_confidence_fields_for_documents(
-                document_ids=document_ids,
-                db=db,
-                confidence_threshold=None  # Use settings default
-            )
-
-            # Flatten for audit_items array
-            all_audit_items = []
-            for doc_id, fields in low_conf_fields_grouped.items():
-                for field in fields:
-                    # Update audit URL with MCP-specific source
-                    field["audit_url"] = field["audit_url"].replace("source=ai_answer", "source=mcp_rag")
-                    all_audit_items.append(field)
-
-            # Filter audit items to only fields used in query
-            audit_items = filter_audit_items_by_fields(
-                all_audit_items,
-                field_lineage["queried_fields"]
-            )
-
-            logger.info(f"[MCP RAG] Filtered audit items from {len(all_audit_items)} to {len(audit_items)} (query-relevant only)")
-
-            # Get confidence summary stats
-            confidence_summary = await get_confidence_summary(
-                document_ids=document_ids,
-                db=db
-            )
-
-            # Enhanced response with LLM guidance + audit metadata
-            response = {
-                "success": True,
-                "summary": f"Answered based on {len(context_chunks)} relevant documents",
-                "question": question,
-                "answer": answer,
-                "sources": [
-                    {
-                        "document_id": c["document_id"],
-                        "filename": c["source"],
-                        "relevance_score": round(c["score"], 3),
-                        "excerpt": c["text"][:200] + "..." if len(c["text"]) > 200 else c["text"]
-                    }
-                    for c in context_chunks
-                ],
-                "confidence": "high" if len(context_chunks) >= 3 else "medium" if len(context_chunks) >= 1 else "low",
-                "metadata": {
-                    "num_sources": len(context_chunks),
-                    "total_matches": search_results.get("total", 0),
-                    "query_method": "claude" if query_optimizer.should_use_claude(query_analysis) else "optimizer"
-                },
-                # NEW: Field lineage tracking
-                "field_lineage": field_lineage,
-                # NEW: Audit metadata for low-confidence data (filtered to query-relevant fields only)
-                "audit_items": audit_items,
-                "audit_items_filtered_count": len(audit_items),
-                "audit_items_total_count": len(all_audit_items),
-                "confidence_summary": confidence_summary,
-                "data_quality": {
-                    "total_fields_cited": confidence_summary["total_fields"],
-                    "low_confidence_count": len(audit_items),  # Use filtered count
-                    "total_low_confidence_in_docs": len(all_audit_items),  # Total unfiltered
-                    "audit_recommended": confidence_summary["audit_recommended"],
-                    "avg_confidence": confidence_summary["avg_confidence"]
-                },
-                "next_steps": {
-                    "to_read_source": f"Call get_document_content({context_chunks[0]['document_id']}) to read full source document" if context_chunks else None,
-                    "to_refine": "Ask a follow-up question with rag_query for more detail",
-                    "to_find_more": "Use search_documents to find additional related documents",
-                    # NEW: Audit recommendation (using filtered count)
-                    "to_review_data": f"Review {len(audit_items)} query-relevant low-confidence fields (of {len(all_audit_items)} total)" if audit_items else None
-                },
-                "web_ui_access": {
-                    "audit_dashboard": f"{settings.FRONTEND_URL}/audit",
-                    "instructions": "Open this URL in your browser to review low-confidence fields"
-                } if audit_items else None,
-                "suggested_next_steps": [
-                    f"Open {settings.FRONTEND_URL}/audit to review low-confidence fields",
-                    "Click on fields with confidence < 0.6 to verify",
-                    "Use inline audit modal for quick verification"
-                ] if audit_items else []
-            }
-
-            return response
-
-        finally:
-            db.close()
-
-    except Exception as e:
-        logger.error(f"RAG query error: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+# ============================================================================
+# REMOVED: rag_query endpoint
+# ============================================================================
+# This endpoint has been removed because it doesn't provide citation links,
+# confidence scores, or audit capabilities that the Ask AI UI provides.
+#
+# For natural language questions about document content, direct users to:
+# http://localhost:3000/query
+#
+# The Ask AI interface provides:
+# - Inline citations with document links
+# - Confidence scores and badges
+# - Inline audit modal for quick verification
+# - PDF viewer with bounding box highlights
+# - Answer regeneration after verification
+#
+# MCP tools should be used for:
+# - Finding specific documents (search_documents)
+# - Retrieving document details (get_document)
+# - Analytics and aggregations (aggregate_field, multi_aggregate)
+# - Schema discovery (list_fields, list_templates)
+# ============================================================================
