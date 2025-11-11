@@ -13,6 +13,7 @@ from app.models.extraction import Extraction
 from app.models.batch import Batch
 from app.models.query_pattern import QueryPattern
 from app.models.settings import Settings, Organization, User
+from app.models.background_job import BackgroundJob
 
 __all__ = [
     # Permissions (must be first to resolve relationships)
@@ -37,4 +38,5 @@ __all__ = [
     "Settings",
     "Organization",
     "User",
+    "BackgroundJob",
 ]

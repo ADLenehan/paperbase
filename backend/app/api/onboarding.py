@@ -1,5 +1,6 @@
 from fastapi import APIRouter, UploadFile, File, Depends, HTTPException
 from sqlalchemy.orm import Session
+from sqlalchemy.orm.attributes import flag_modified
 from typing import List, Dict, Any
 from pydantic import BaseModel
 from app.core.database import get_db
@@ -454,3 +455,246 @@ async def modify_schema_with_prompt(
             status_code=500,
             detail=f"Failed to modify schema: {str(e)}"
         )
+
+
+@router.post("/schemas/{schema_id}/fields/suggest")
+async def suggest_field_from_description(
+    schema_id: int,
+    request: dict,
+    db: Session = Depends(get_db)
+):
+    """
+    Step 1: Analyze existing docs and suggest field definition
+
+    Request body:
+        {
+            "description": "I want to extract payment terms like Net 30"
+        }
+
+    Returns:
+        {
+            "field": {...field_config...},
+            "sample_extractions": [...],
+            "estimated_success_rate": 0.80,
+            "estimated_cost": 2.34,
+            "estimated_time_seconds": 120,
+            "total_documents": 234
+        }
+    """
+    from app.models.document import Document
+
+    description = request.get("description", "")
+    if not description:
+        raise HTTPException(status_code=400, detail="Description required")
+
+    # Get schema
+    schema = db.query(Schema).filter(Schema.id == schema_id).first()
+    if not schema:
+        raise HTTPException(status_code=404, detail="Schema not found")
+
+    # Get 3-5 sample documents with parse results
+    sample_docs = db.query(Document)\
+        .filter(Document.schema_id == schema_id)\
+        .limit(5)\
+        .all()
+
+    if not sample_docs:
+        raise HTTPException(
+            status_code=400,
+            detail="No documents found for this schema. Upload documents first."
+        )
+
+    # Get parsed documents (prefer PhysicalFile, fallback to legacy)
+    parsed_samples = []
+    for doc in sample_docs:
+        if doc.physical_file and doc.physical_file.reducto_parse_result:
+            parsed_samples.append(doc.physical_file.reducto_parse_result)
+        elif hasattr(doc, 'reducto_parse_result') and doc.reducto_parse_result:
+            parsed_samples.append(doc.reducto_parse_result)
+
+    if not parsed_samples:
+        raise HTTPException(
+            status_code=400,
+            detail="No parsed documents available. Documents may still be processing."
+        )
+
+    # Get total document count
+    total_docs = db.query(Document)\
+        .filter(Document.schema_id == schema_id)\
+        .count()
+
+    # Call Claude to suggest field
+    claude_service = ClaudeService()
+    try:
+        suggestion = await claude_service.suggest_field_from_existing_docs(
+            user_description=description,
+            sample_documents=parsed_samples,
+            total_document_count=total_docs
+        )
+
+        logger.info(f"Suggested field '{suggestion['field']['name']}' for schema {schema_id}")
+
+        return suggestion
+
+    except Exception as e:
+        logger.error(f"Error suggesting field: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to suggest field: {str(e)}"
+        )
+
+
+@router.post("/schemas/{schema_id}/fields/add")
+async def add_field_and_extract(
+    schema_id: int,
+    request: dict,
+    db: Session = Depends(get_db)
+):
+    """
+    Step 2: Add field to schema and optionally extract from existing docs
+
+    Request body:
+        {
+            "field": {
+                "name": "payment_terms",
+                "type": "text",
+                "description": "...",
+                "extraction_hints": ["..."],
+                "confidence_threshold": 0.75,
+                "required": false
+            },
+            "extract_from_existing": true
+        }
+
+    Returns:
+        {
+            "success": true,
+            "field": {...},
+            "extraction_job_id": 123  // if extract_from_existing=true
+        }
+    """
+    from app.models.document import Document
+    from app.services.field_extraction_service import FieldExtractionService
+
+    field_config = request.get("field")
+    extract_from_existing = request.get("extract_from_existing", False)
+
+    if not field_config:
+        raise HTTPException(status_code=400, detail="Field config required")
+
+    # Validate field_config has required fields
+    if "name" not in field_config or "type" not in field_config:
+        raise HTTPException(
+            status_code=400,
+            detail="Field must have 'name' and 'type'"
+        )
+
+    # Get schema
+    schema = db.query(Schema).filter(Schema.id == schema_id).first()
+    if not schema:
+        raise HTTPException(status_code=404, detail="Schema not found")
+
+    # Check if field name already exists
+    existing_fields = schema.fields or []
+    if any(f["name"] == field_config["name"] for f in existing_fields):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Field '{field_config['name']}' already exists in this schema"
+        )
+
+    # Add field to schema
+    schema.fields.append(field_config)
+    flag_modified(schema, "fields")  # Mark JSON field as modified for SQLAlchemy
+    schema.updated_at = datetime.utcnow()
+    db.commit()
+
+    logger.info(f"Added field '{field_config['name']}' to schema {schema_id}")
+
+    # Update Elasticsearch mapping
+    try:
+        elastic_service = ElasticsearchService()
+        # For now, we'll recreate the index with the new field
+        # In future, could use _mapping API to add field dynamically
+        await elastic_service.create_index({
+            "name": schema.name,
+            "fields": schema.fields
+        })
+        logger.info(f"Updated Elasticsearch mapping for schema {schema_id}")
+    except Exception as e:
+        logger.warning(f"Failed to update Elasticsearch mapping: {e}")
+        # Don't fail the request if ES update fails
+
+    # Extract from existing docs if requested
+    job_id = None
+    if extract_from_existing:
+        extraction_service = FieldExtractionService()
+        job = await extraction_service.extract_field_from_all_docs(
+            schema_id=schema_id,  # Fixed: use schema_id, not template_id
+            field_config=field_config,
+            db=db
+        )
+        job_id = job.id
+        logger.info(f"Started field extraction job {job_id} for schema {schema_id}")
+
+    return {
+        "success": True,
+        "field": field_config,
+        "extraction_job_id": job_id
+    }
+
+
+@router.get("/jobs/{job_id}")
+async def get_job_status(job_id: int, db: Session = Depends(get_db)):
+    """
+    Get status of a background job
+
+    Returns:
+        {
+            "id": 123,
+            "type": "field_extraction",
+            "status": "running",
+            "total_items": 234,
+            "processed_items": 45,
+            "progress": 0.19,
+            "metadata": {...},
+            "created_at": "...",
+            "updated_at": "...",
+            "completed_at": null,
+            "error_message": null
+        }
+    """
+    from app.services.field_extraction_service import FieldExtractionService
+
+    extraction_service = FieldExtractionService()
+    try:
+        status = await extraction_service.get_job_status(job_id, db)
+        return status
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+@router.post("/jobs/{job_id}/cancel")
+async def cancel_job(job_id: int, db: Session = Depends(get_db)):
+    """
+    Cancel a running background job
+
+    Returns:
+        {
+            "success": true,
+            "message": "Job cancelled"
+        }
+    """
+    from app.services.field_extraction_service import FieldExtractionService
+
+    extraction_service = FieldExtractionService()
+    try:
+        cancelled = await extraction_service.cancel_job(job_id, db)
+        if cancelled:
+            return {"success": True, "message": "Job cancelled"}
+        else:
+            return {
+                "success": False,
+                "message": "Job already completed or failed"
+            }
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
