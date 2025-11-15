@@ -9,6 +9,9 @@ class Document(Base):
 
     id = Column(Integer, primary_key=True, index=True)
 
+    # Multi-tenancy: Documents belong to organizations
+    organization_id = Column(Integer, ForeignKey("organizations.id"), nullable=True, index=True)
+
     # NEW: Link to PhysicalFile for deduplication
     physical_file_id = Column(Integer, ForeignKey("physical_files.id"), nullable=True, index=True)
 
