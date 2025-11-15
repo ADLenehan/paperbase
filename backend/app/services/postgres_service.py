@@ -289,9 +289,161 @@ class PostgresService:
     def _apply_custom_query(self, stmt, custom_query: Dict[str, Any]):
         """
         Apply custom query conditions from NL search.
-        Translates SQL-like conditions to SQLAlchemy.
+        Handles both legacy ES query format and new SQL conditions format.
+        
+        Args:
+            stmt: SQLAlchemy select statement
+            custom_query: Either {"query": {...}} (ES format) or {"where": "...", "order_by": "..."} (SQL format)
+        
+        Returns:
+            Modified SQLAlchemy statement
         """
-        logger.warning("Custom query support not yet implemented in PostgreSQL service")
+        if "where" in custom_query or "order_by" in custom_query:
+            return self._apply_sql_conditions(stmt, custom_query)
+        
+        if "query" in custom_query:
+            logger.warning("Received Elasticsearch query format - attempting to translate to SQL")
+            return self._translate_es_query(stmt, custom_query.get("query", {}))
+        
+        logger.warning("Received raw Elasticsearch query - attempting to translate to SQL")
+        return self._translate_es_query(stmt, custom_query)
+    
+    def _apply_sql_conditions(self, stmt, sql_conditions: Dict[str, Any]):
+        """
+        Apply SQL conditions from Claude's SQL generation.
+        
+        Args:
+            sql_conditions: {"where": "...", "order_by": "...", "limit": 10}
+        """
+        where_clause = sql_conditions.get("where")
+        order_by = sql_conditions.get("order_by")
+        limit = sql_conditions.get("limit")
+        
+        if where_clause:
+            stmt = stmt.where(text(where_clause))
+        
+        if order_by:
+            stmt = stmt.order_by(text(order_by))
+        
+        if limit:
+            stmt = stmt.limit(limit)
+        
+        return stmt
+    
+    def _translate_es_query(self, stmt, es_query: Dict[str, Any]):
+        """
+        Translate Elasticsearch query to SQLAlchemy (best effort).
+        This is for backward compatibility during migration.
+        """
+        if not es_query:
+            return stmt
+        
+        if "bool" in es_query:
+            bool_query = es_query["bool"]
+            
+            if "must" in bool_query:
+                for must_clause in bool_query["must"]:
+                    stmt = self._translate_es_clause(stmt, must_clause)
+            
+            if "filter" in bool_query:
+                filters = bool_query["filter"]
+                if not isinstance(filters, list):
+                    filters = [filters]
+                for filter_clause in filters:
+                    stmt = self._translate_es_clause(stmt, filter_clause)
+            
+            if "should" in bool_query:
+                or_conditions = []
+                for should_clause in bool_query["should"]:
+                    stmt = self._translate_es_clause(stmt, should_clause)
+                    break
+        
+        else:
+            stmt = self._translate_es_clause(stmt, es_query)
+        
+        return stmt
+    
+    def _translate_es_clause(self, stmt, clause: Dict[str, Any]):
+        """Translate a single ES clause to SQLAlchemy"""
+        if "match" in clause:
+            for field, value in clause["match"].items():
+                if isinstance(value, dict):
+                    query_text = value.get("query", "")
+                else:
+                    query_text = value
+                
+                if field == "full_text" or field == "_all_text":
+                    ts_query = func.plainto_tsquery('english', query_text)
+                    stmt = stmt.where(
+                        DocumentSearchIndex.full_text_tsv.op('@@')(ts_query)
+                    ).order_by(
+                        func.ts_rank(DocumentSearchIndex.full_text_tsv, ts_query).desc()
+                    )
+        
+        elif "multi_match" in clause:
+            query_text = clause["multi_match"].get("query", "")
+            ts_query = func.plainto_tsquery('english', query_text)
+            stmt = stmt.where(
+                or_(
+                    DocumentSearchIndex.full_text_tsv.op('@@')(ts_query),
+                    DocumentSearchIndex.all_text_tsv.op('@@')(ts_query)
+                )
+            ).order_by(
+                func.ts_rank(DocumentSearchIndex.full_text_tsv, ts_query).desc()
+            )
+        
+        elif "term" in clause:
+            for field, value in clause["term"].items():
+                if field.startswith("_query_context."):
+                    context_field = field.replace("_query_context.", "").replace(".keyword", "")
+                    stmt = stmt.where(
+                        DocumentSearchIndex.query_context[context_field].astext == str(value)
+                    )
+                elif field == "folder_path.keyword" or field == "folder_path":
+                    stmt = stmt.join(Document).where(
+                        Document.folder_path.like(f"{value}%")
+                    )
+                else:
+                    field_clean = field.replace(".keyword", "")
+                    stmt = stmt.where(
+                        DocumentSearchIndex.extracted_fields[field_clean].astext == str(value)
+                    )
+        
+        elif "prefix" in clause:
+            for field, value in clause["prefix"].items():
+                if field == "folder_path.keyword" or field == "folder_path":
+                    stmt = stmt.join(Document).where(
+                        Document.folder_path.like(f"{value}%")
+                    )
+                else:
+                    field_clean = field.replace(".keyword", "")
+                    stmt = stmt.where(
+                        DocumentSearchIndex.extracted_fields[field_clean].astext.like(f"{value}%")
+                    )
+        
+        elif "range" in clause:
+            for field, range_def in clause["range"].items():
+                field_clean = field.replace(".keyword", "")
+                field_expr = cast(
+                    DocumentSearchIndex.extracted_fields[field_clean].astext,
+                    Float
+                )
+                
+                if "gte" in range_def:
+                    stmt = stmt.where(field_expr >= range_def["gte"])
+                if "lte" in range_def:
+                    stmt = stmt.where(field_expr <= range_def["lte"])
+                if "gt" in range_def:
+                    stmt = stmt.where(field_expr > range_def["gt"])
+                if "lt" in range_def:
+                    stmt = stmt.where(field_expr < range_def["lt"])
+        
+        elif "exists" in clause:
+            field = clause["exists"]["field"]
+            stmt = stmt.where(
+                DocumentSearchIndex.extracted_fields.has_key(field)
+            )
+        
         return stmt
 
     async def get_document(self, document_id: int) -> Optional[Dict[str, Any]]:
