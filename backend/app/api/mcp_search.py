@@ -12,7 +12,7 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from app.services.claude_service import ClaudeService
-from app.services.elastic_service import ElasticsearchService
+from app.services.postgres_service import PostgresService
 from app.services.query_optimizer import QueryOptimizer
 
 logger = logging.getLogger(__name__)
@@ -68,14 +68,14 @@ async def search_documents_mcp(request: MCPSearchRequest):
     """
 
     from app.services.schema_registry import SchemaRegistry
+    from app.core.database import SessionLocal
 
-    elastic_service = ElasticsearchService()
     claude_service = ClaudeService()
 
     try:
         # Get database session
-        from app.core.database import SessionLocal
         db = SessionLocal()
+        postgres_service = PostgresService(db)
 
         try:
             schema_registry = SchemaRegistry(db)
@@ -144,7 +144,7 @@ async def search_documents_mcp(request: MCPSearchRequest):
                 })
 
             # Execute search
-            search_results = await elastic_service.search(
+            search_results = await postgres_service.search(
                 query=None,
                 filters=None,
                 custom_query=es_query,
@@ -168,7 +168,7 @@ async def search_documents_mcp(request: MCPSearchRequest):
                 # Get common aggregations
                 try:
                     agg_filters = request.filters or {}
-                    aggregations_result = await elastic_service.get_multi_aggregations(
+                    aggregations_result = await postgres_service.get_multi_aggregations(
                         aggregations=[
                             {"name": "by_status", "field": "status", "type": "terms", "config": {"size": 10}},
                             {"name": "by_template", "field": "_query_context.template_name", "type": "terms", "config": {"size": 10}}
@@ -233,19 +233,26 @@ async def get_document_mcp(document_id: int):
     confidence scores, and metadata.
     """
 
-    elastic_service = ElasticsearchService()
-
+    from app.core.database import SessionLocal
+    
     try:
-        document = await elastic_service.get_document(document_id)
+        db = SessionLocal()
+        postgres_service = PostgresService(db)
+        
+        try:
+            document = await postgres_service.get_document(document_id)
 
-        if not document:
-            raise HTTPException(status_code=404, detail=f"Document {document_id} not found")
+            if not document:
+                raise HTTPException(status_code=404, detail=f"Document {document_id} not found")
 
-        return {
-            "success": True,
-            "document_id": document_id,
-            "document": document
-        }
+            return {
+                "success": True,
+                "document_id": document_id,
+                "document": document
+            }
+        
+        finally:
+            db.close()
 
     except HTTPException:
         raise
@@ -270,22 +277,29 @@ async def aggregate_mcp(request: MCPAggregationRequest):
     ```
     """
 
-    elastic_service = ElasticsearchService()
-
+    from app.core.database import SessionLocal
+    
     try:
-        result = await elastic_service.get_aggregations(
-            field=request.field,
-            agg_type=request.aggregation_type,
-            agg_config=request.config,
-            filters=request.filters
-        )
+        db = SessionLocal()
+        postgres_service = PostgresService(db)
+        
+        try:
+            result = await postgres_service.get_aggregations(
+                field=request.field,
+                agg_type=request.aggregation_type,
+                agg_config=request.config,
+                filters=request.filters
+            )
 
-        return {
-            "success": True,
-            "field": request.field,
-            "aggregation_type": request.aggregation_type,
-            "results": result
-        }
+            return {
+                "success": True,
+                "field": request.field,
+                "aggregation_type": request.aggregation_type,
+                "results": result
+            }
+        
+        finally:
+            db.close()
 
     except Exception as e:
         logger.error(f"MCP aggregation error: {e}", exc_info=True)
@@ -404,22 +418,29 @@ async def get_search_stats():
     Returns counts, distributions, and health metrics.
     """
 
-    elastic_service = ElasticsearchService()
-
+    from app.core.database import SessionLocal
+    
     try:
-        # Get comprehensive stats
-        aggregations = await elastic_service.get_multi_aggregations(
-            aggregations=[
-                {"name": "total_docs", "field": "document_id", "type": "cardinality"},
-                {"name": "status_breakdown", "field": "status", "type": "terms", "config": {"size": 20}},
-                {"name": "template_usage", "field": "_query_context.template_name", "type": "terms", "config": {"size": 20}},
-            ]
-        )
+        db = SessionLocal()
+        postgres_service = PostgresService(db)
+        
+        try:
+            # Get comprehensive stats
+            aggregations = await postgres_service.get_multi_aggregations(
+                aggregations=[
+                    {"name": "total_docs", "field": "document_id", "type": "cardinality"},
+                    {"name": "status_breakdown", "field": "status", "type": "terms", "config": {"size": 20}},
+                    {"name": "template_usage", "field": "_query_context.template_name", "type": "terms", "config": {"size": 20}},
+                ]
+            )
 
-        return {
-            "success": True,
-            "statistics": aggregations
-        }
+            return {
+                "success": True,
+                "statistics": aggregations
+            }
+        
+        finally:
+            db.close()
 
     except Exception as e:
         logger.error(f"MCP stats error: {e}", exc_info=True)
@@ -511,46 +532,53 @@ async def get_document_content_mcp(document_id: int):
     - Content extraction
     """
 
-    elastic_service = ElasticsearchService()
-
+    from app.core.database import SessionLocal
+    
     try:
-        doc = await elastic_service.get_document(document_id)
+        db = SessionLocal()
+        postgres_service = PostgresService(db)
+        
+        try:
+            doc = await postgres_service.get_document(document_id)
 
-        if not doc:
-            raise HTTPException(status_code=404, detail=f"Document {document_id} not found")
+            if not doc:
+                raise HTTPException(status_code=404, detail=f"Document {document_id} not found")
 
-        # Extract full text (may be very long)
-        full_text = doc.get("full_text", "")
+            # Extract full text (may be very long)
+            full_text = doc.get("full_text", "")
 
-        # Get metadata
-        query_context = doc.get("_query_context", {})
+            # Get metadata
+            query_context = doc.get("_query_context", {})
 
-        # Enhanced response with summary and guidance
-        return {
-            "success": True,
-            "summary": f"Document '{doc.get('filename')}' ({len(full_text):,} characters, {len(query_context.get('field_names', []))} fields extracted)",
-            "document_id": document_id,
-            "filename": doc.get("filename"),
-            "content": full_text,
-            "content_length": len(full_text),
-            "metadata": {
-                "uploaded_at": doc.get("uploaded_at"),
-                "processed_at": doc.get("processed_at"),
-                "template": query_context.get("template_name"),
-                "status": doc.get("status"),
-                "field_count": len(query_context.get("field_names", []))
-            },
-            "extracted_fields": {
-                k: v for k, v in doc.items()
-                if not k.startswith("_") and k not in ["document_id", "filename", "full_text", "uploaded_at", "processed_at", "confidence_scores"]
-            },
-            "content_preview": full_text[:500] + "..." if len(full_text) > 500 else full_text,
-            "next_steps": {
-                "to_analyze": "Process this content with your analysis logic",
-                "to_chunk": f"If content is too long, use get_document_chunks({document_id}) for paginated access",
-                "to_ask_question": "Direct user to Ask AI interface at http://localhost:3000/query for natural language questions"
+            # Enhanced response with summary and guidance
+            return {
+                "success": True,
+                "summary": f"Document '{doc.get('filename')}' ({len(full_text):,} characters, {len(query_context.get('field_names', []))} fields extracted)",
+                "document_id": document_id,
+                "filename": doc.get("filename"),
+                "content": full_text,
+                "content_length": len(full_text),
+                "metadata": {
+                    "uploaded_at": doc.get("uploaded_at"),
+                    "processed_at": doc.get("processed_at"),
+                    "template": query_context.get("template_name"),
+                    "status": doc.get("status"),
+                    "field_count": len(query_context.get("field_names", []))
+                },
+                "extracted_fields": {
+                    k: v for k, v in doc.items()
+                    if not k.startswith("_") and k not in ["document_id", "filename", "full_text", "uploaded_at", "processed_at", "confidence_scores"]
+                },
+                "content_preview": full_text[:500] + "..." if len(full_text) > 500 else full_text,
+                "next_steps": {
+                    "to_analyze": "Process this content with your analysis logic",
+                    "to_chunk": f"If content is too long, use get_document_chunks({document_id}) for paginated access",
+                    "to_ask_question": "Direct user to Ask AI interface at http://localhost:3000/query for natural language questions"
+                }
             }
-        }
+        
+        finally:
+            db.close()
 
     except HTTPException:
         raise
@@ -583,76 +611,83 @@ async def get_document_chunks_mcp(
     - Memory-efficient document reading
     """
 
-    elastic_service = ElasticsearchService()
-
+    from app.core.database import SessionLocal
+    
     try:
-        doc = await elastic_service.get_document(document_id)
+        db = SessionLocal()
+        postgres_service = PostgresService(db)
+        
+        try:
+            doc = await postgres_service.get_document(document_id)
 
-        if not doc:
-            raise HTTPException(status_code=404, detail=f"Document {document_id} not found")
+            if not doc:
+                raise HTTPException(status_code=404, detail=f"Document {document_id} not found")
 
-        full_text = doc.get("full_text", "")
+            full_text = doc.get("full_text", "")
 
-        if not full_text:
+            if not full_text:
+                return {
+                    "success": True,
+                    "document_id": document_id,
+                    "chunks": [],
+                    "total_chunks": 0,
+                    "message": "Document has no text content"
+                }
+
+            # Split into chunks with overlap
+            chunks = []
+            start = 0
+            chunk_num = 0
+
+            while start < len(full_text):
+                end = min(start + chunk_size, len(full_text))
+                chunk_text = full_text[start:end]
+
+                chunk_num += 1
+                chunks.append({
+                    "chunk_number": chunk_num,
+                    "start_char": start,
+                    "end_char": end,
+                    "content": chunk_text,
+                    "length": len(chunk_text)
+                })
+
+                # Move start position with overlap
+                start = end - overlap
+                if start >= len(full_text):
+                    break
+
+            # Return requested page
+            total_chunks = len(chunks)
+            if page > total_chunks:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Page {page} out of range. Document has {total_chunks} chunks."
+                )
+
+            requested_chunk = chunks[page - 1]
+
             return {
                 "success": True,
                 "document_id": document_id,
-                "chunks": [],
-                "total_chunks": 0,
-                "message": "Document has no text content"
+                "filename": doc.get("filename"),
+                "chunk": requested_chunk,
+                "pagination": {
+                    "current_page": page,
+                    "total_chunks": total_chunks,
+                    "chunk_size": chunk_size,
+                    "overlap": overlap,
+                    "has_next": page < total_chunks,
+                    "has_previous": page > 1
+                },
+                "metadata": {
+                    "total_characters": len(full_text),
+                    "template": doc.get("_query_context", {}).get("template_name")
+                }
             }
-
-        # Split into chunks with overlap
-        chunks = []
-        start = 0
-        chunk_num = 0
-
-        while start < len(full_text):
-            end = min(start + chunk_size, len(full_text))
-            chunk_text = full_text[start:end]
-
-            chunk_num += 1
-            chunks.append({
-                "chunk_number": chunk_num,
-                "start_char": start,
-                "end_char": end,
-                "content": chunk_text,
-                "length": len(chunk_text)
-            })
-
-            # Move start position with overlap
-            start = end - overlap
-            if start >= len(full_text):
-                break
-
-        # Return requested page
-        total_chunks = len(chunks)
-        if page > total_chunks:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Page {page} out of range. Document has {total_chunks} chunks."
-            )
-
-        requested_chunk = chunks[page - 1]
-
-        return {
-            "success": True,
-            "document_id": document_id,
-            "filename": doc.get("filename"),
-            "chunk": requested_chunk,
-            "pagination": {
-                "current_page": page,
-                "total_chunks": total_chunks,
-                "chunk_size": chunk_size,
-                "overlap": overlap,
-                "has_next": page < total_chunks,
-                "has_previous": page > 1
-            },
-            "metadata": {
-                "total_characters": len(full_text),
-                "template": doc.get("_query_context", {}).get("template_name")
-            }
-        }
+        
+        finally:
+            db.close()
 
     except HTTPException:
         raise
