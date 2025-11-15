@@ -549,7 +549,7 @@ async def _get_statistics(args: Dict[str, Any]) -> List[TextContent]:
         return [TextContent(type="text", text=response)]
 
     finally:
-        db.close()
+        postgres_service.close() if hasattr(postgres_service, 'close') else None
         db.close()
 
 

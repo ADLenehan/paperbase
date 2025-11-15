@@ -175,7 +175,7 @@ async def auto_match_documents(
         # Use hybrid matching
         match_result = await hybrid_match_document(
             document=doc,
-            postgres_service=elastic_service,
+            postgres_service=postgres_service,
             claude_service=claude_service,
             available_templates=available_templates,
             db=db
