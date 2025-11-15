@@ -5,12 +5,14 @@ Provides helper functions for retrieving low-confidence fields and generating
 audit URLs for use in AI answer citations and MCP responses.
 """
 
-from typing import List, Dict, Any, Optional
-from sqlalchemy.orm import Session
-from sqlalchemy import and_
-from app.models.document import ExtractedField, Document
-from app.services.settings_service import SettingsService
 import logging
+from typing import Any, Dict, List, Optional
+
+from sqlalchemy import and_
+from sqlalchemy.orm import Session
+
+from app.models.document import Document, ExtractedField
+from app.services.settings_service import SettingsService
 
 logger = logging.getLogger(__name__)
 

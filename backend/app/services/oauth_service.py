@@ -15,19 +15,20 @@ Security Features:
 - Scope minimal permissions
 """
 
+import base64
+import hashlib
+import logging
 import os
 import secrets
-import hashlib
-import base64
-from typing import Dict, Any, Optional, Tuple
 from datetime import datetime, timedelta
+from typing import Any, Dict, Optional, Tuple
+
 from authlib.integrations.starlette_client import OAuth
-from starlette.config import Config
 from sqlalchemy.orm import Session
-import logging
+from starlette.config import Config
 
 from app.models.settings import User
-from app.utils.encryption import encrypt_oauth_tokens, decrypt_oauth_tokens
+from app.utils.encryption import decrypt_oauth_tokens, encrypt_oauth_tokens
 
 logger = logging.getLogger(__name__)
 

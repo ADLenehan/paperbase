@@ -1,10 +1,12 @@
-from reducto import Reducto
-from typing import Dict, Any, List, Optional
-from app.core.config import settings
-from app.core.exceptions import ReductoError, FileUploadError
+import asyncio
 import logging
 import os
-import asyncio
+from typing import Any, Dict, List, Optional
+
+from reducto import Reducto
+
+from app.core.config import settings
+from app.core.exceptions import FileUploadError, ReductoError
 
 logger = logging.getLogger(__name__)
 
@@ -23,7 +25,7 @@ class ReductoService:
         self.timeout = settings.REDUCTO_TIMEOUT
         # Reducto SDK requires API key to be passed
         self.client = Reducto(api_key=self.api_key)
-        logger.debug(f"ReductoService initialized")
+        logger.debug("ReductoService initialized")
 
     async def parse_document(self, file_path: str) -> Dict[str, Any]:
         """

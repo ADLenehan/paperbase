@@ -11,11 +11,12 @@ Usage:
     # Or integrated with FastAPI (see main.py)
 """
 
-from mcp.server import Server
-from mcp.types import Tool, TextContent, EmbeddedResource
-from typing import Any, Dict, List
-import logging
 import json
+import logging
+from typing import Any, Dict, List
+
+from mcp.server import Server
+from mcp.types import EmbeddedResource, TextContent, Tool
 
 logger = logging.getLogger(__name__)
 
@@ -377,11 +378,11 @@ async def _get_audit_queue(args: Dict[str, Any]) -> List[TextContent]:
 
             # Suggest why it needs review
             if field.confidence < 0.3:
-                response += f"   ⚠️ Very low confidence - likely incorrect\n"
+                response += "   ⚠️ Very low confidence - likely incorrect\n"
             elif field.confidence < 0.5:
-                response += f"   ⚠️ Low confidence - please verify\n"
+                response += "   ⚠️ Low confidence - please verify\n"
             else:
-                response += f"   ℹ️ Medium confidence - quick check recommended\n"
+                response += "   ℹ️ Medium confidence - quick check recommended\n"
 
             response += "\n"
 
@@ -399,10 +400,11 @@ async def _verify_extraction(args: Dict[str, Any]) -> List[TextContent]:
     Submit a verification.
     Reuses: app/api/audit.py verification logic
     """
-    from app.core.database import SessionLocal
-    from app.models.verification import Verification
-    from app.models.document import ExtractedField
     from datetime import datetime
+
+    from app.core.database import SessionLocal
+    from app.models.document import ExtractedField
+    from app.models.verification import Verification
 
     doc_id = args["document_id"]
     field_name = args["field_name"]
@@ -504,9 +506,9 @@ async def _get_statistics(args: Dict[str, Any]) -> List[TextContent]:
     Get system statistics.
     Reuses: elastic_service.get_index_stats() and DB queries
     """
-    from app.services.elastic_service import ElasticsearchService
     from app.core.database import SessionLocal
     from app.models.document import Document
+    from app.services.elastic_service import ElasticsearchService
 
     elastic_service = ElasticsearchService()
     db = SessionLocal()

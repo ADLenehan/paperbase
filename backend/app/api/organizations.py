@@ -8,16 +8,17 @@ Handles:
 - Role assignment
 """
 
-from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.orm import Session
-from pydantic import BaseModel, EmailStr
-from typing import Optional, List
 from datetime import datetime
+from typing import List, Optional
 
-from app.core.database import get_db
+from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import BaseModel, EmailStr
+from sqlalchemy.orm import Session
+
 from app.core.auth import get_current_user
-from app.models.settings import User, Organization, OrganizationInvite
-from app.services.organization_service import get_organization_service, OrganizationService
+from app.core.database import get_db
+from app.models.settings import Organization, OrganizationInvite, User
+from app.services.organization_service import OrganizationService, get_organization_service
 
 router = APIRouter(prefix="/api/organizations", tags=["Organizations"])
 

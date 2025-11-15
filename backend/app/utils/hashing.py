@@ -1,5 +1,4 @@
 import hashlib
-from typing import BinaryIO
 
 
 def calculate_file_hash(file_path: str) -> str:

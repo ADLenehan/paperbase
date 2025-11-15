@@ -1,15 +1,20 @@
-from fastapi import APIRouter, Depends, HTTPException
-from typing import Optional, Dict, Any, List
-from pydantic import BaseModel
-from app.services.elastic_service import ElasticsearchService
-from app.services.claude_service import ClaudeService
-from app.services.query_optimizer import QueryOptimizer
-from app.services.answer_cache import get_answer_cache
-from app.core.database import get_db
-from app.models.schema import Schema, FieldDefinition
-from app.utils.query_field_extractor import extract_fields_from_es_query, filter_audit_items_by_fields
-from sqlalchemy.orm import Session
 import logging
+from typing import Any, Dict, List, Optional
+
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
+from sqlalchemy.orm import Session
+
+from app.core.database import get_db
+from app.models.schema import Schema
+from app.services.answer_cache import get_answer_cache
+from app.services.claude_service import ClaudeService
+from app.services.elastic_service import ElasticsearchService
+from app.services.query_optimizer import QueryOptimizer
+from app.utils.query_field_extractor import (
+    extract_fields_from_es_query,
+    filter_audit_items_by_fields,
+)
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/search", tags=["search"])
@@ -43,10 +48,11 @@ async def search_documents(
         folder_path: Optional folder path to restrict search (e.g., "invoices" or "invoices/acme-corp")
         conversation_history: Optional conversation context for follow-up questions
     """
-    from app.services.schema_registry import SchemaRegistry
-    from app.models.query_pattern import QueryCache
     import hashlib
     from datetime import datetime
+
+    from app.models.query_pattern import QueryCache
+    from app.services.schema_registry import SchemaRegistry
 
     claude_service = ClaudeService()
     elastic_service = ElasticsearchService()
@@ -106,8 +112,8 @@ async def search_documents(
 
             # Get audit metadata for low-confidence fields
             from app.utils.audit_helpers import (
+                get_confidence_summary,
                 get_low_confidence_fields_for_documents,
-                get_confidence_summary
             )
 
             document_ids = [doc.get("id") for doc in search_results.get("documents", []) if doc.get("id")]
@@ -136,8 +142,8 @@ async def search_documents(
             confidence_summary = await get_confidence_summary(document_ids=document_ids, db=db)
 
             # NEW: Save query history for viewing source documents
-            from app.models.query_history import QueryHistory
             from app.core.config import settings
+            from app.models.query_history import QueryHistory
 
             query_history = QueryHistory.create_from_search(
                 query=request.query,
@@ -399,8 +405,8 @@ async def search_documents(
 
         # Get audit metadata for low-confidence fields
         from app.utils.audit_helpers import (
+            get_confidence_summary,
             get_low_confidence_fields_for_documents,
-            get_confidence_summary
         )
 
         # Skip audit metadata for aggregation queries (no individual documents to audit)
@@ -454,8 +460,8 @@ async def search_documents(
             logger.warning(f"Failed to cache query: {cache_error}")
 
         # NEW: Save query history for viewing source documents
-        from app.models.query_history import QueryHistory
         from app.core.config import settings
+        from app.models.query_history import QueryHistory
 
         # Extract document IDs from search results (skip for aggregation queries)
         if query_type == "aggregation" and aggregation_spec:

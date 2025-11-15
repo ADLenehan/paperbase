@@ -8,16 +8,17 @@ Handles:
 - Multi-tenant data isolation
 """
 
-import secrets
-import string
-from typing import List, Optional, Dict, Any
-from datetime import datetime, timedelta
-from sqlalchemy.orm import Session
-from sqlalchemy import and_, or_
 import logging
 import re
+import secrets
+import string
+from datetime import datetime, timedelta
+from typing import List, Optional
 
-from app.models.settings import Organization, User, OrganizationInvite
+from sqlalchemy import and_, or_
+from sqlalchemy.orm import Session
+
+from app.models.settings import Organization, OrganizationInvite, User
 
 logger = logging.getLogger(__name__)
 

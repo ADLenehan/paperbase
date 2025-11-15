@@ -1,18 +1,18 @@
 """
 Export API - Endpoints for exporting document data in various formats
 """
-from fastapi import APIRouter, Depends, HTTPException, Query
-from fastapi.responses import StreamingResponse, Response
-from sqlalchemy.orm import Session
-from typing import Optional, List
-from datetime import date, datetime
-from pydantic import BaseModel, Field
-import io
 import logging
+from datetime import date, datetime
+from typing import List, Optional
+
+from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import Response
+from pydantic import BaseModel, Field
+from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.services.export_service import ExportService
 from app.models.template import SchemaTemplate
+from app.services.export_service import ExportService
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/export", tags=["export"])
@@ -48,8 +48,9 @@ async def list_exportable_templates(db: Session = Depends(get_db)):
     template_list = []
     for template in templates:
         # Count documents using this template
-        from app.models.document import Document
         from sqlalchemy import or_
+
+        from app.models.document import Document
 
         doc_count = db.query(Document).filter(
             or_(
@@ -499,7 +500,7 @@ async def export_documents(
             headers={"Content-Disposition": f"attachment; filename={filename}"}
         )
 
-    except ValueError as e:
+    except ValueError:
         raise HTTPException(status_code=400, detail="Invalid document IDs format")
     except HTTPException:
         raise

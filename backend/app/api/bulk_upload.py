@@ -1,25 +1,26 @@
-from fastapi import APIRouter, UploadFile, File, Depends, HTTPException, BackgroundTasks
-from sqlalchemy.orm import Session
-from typing import List, Dict, Any, Optional
+import logging
+import os
+from collections import defaultdict
+from datetime import datetime
+from typing import Any, Dict, List, Optional
+
+from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, UploadFile
 from pydantic import BaseModel
+from sqlalchemy.orm import Session
+
 from app.core.database import get_db
-from app.core.config import settings
 from app.models.document import Document, ExtractedField
 from app.models.physical_file import PhysicalFile
 from app.models.schema import Schema
 from app.models.template import SchemaTemplate
-from app.services.reducto_service import ReductoService
 from app.services.claude_service import ClaudeService
 from app.services.elastic_service import ElasticsearchService
 from app.services.file_service import FileService
+from app.services.reducto_service import ReductoService
 from app.utils.file_organization import get_template_folder, organize_document_file
-from app.utils.template_matching import hybrid_match_document
 from app.utils.hashing import calculate_content_hash
-from app.utils.reducto_validation import validate_schema_for_reducto, format_validation_report
-import logging
-import os
-from datetime import datetime
-from collections import defaultdict
+from app.utils.reducto_validation import format_validation_report, validate_schema_for_reducto
+from app.utils.template_matching import hybrid_match_document
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/bulk", tags=["bulk-upload"])
@@ -409,7 +410,9 @@ async def upload_and_analyze(
                                 # If using PhysicalFile, we need to handle shared files
                                 if doc.physical_file:
                                     # Copy file instead of moving (preserve PhysicalFile for other Documents)
-                                    from app.utils.file_organization import organize_document_file_copy
+                                    from app.utils.file_organization import (
+                                        organize_document_file_copy,
+                                    )
                                     new_path = organize_document_file_copy(
                                         doc.actual_file_path,
                                         doc.filename,
@@ -1186,7 +1189,7 @@ async def validate_schema(request: ValidateSchemaRequest):
             "validation": validation_result,
             "report": report,
             "message": (
-                f"✅ Schema is Reducto-compatible"
+                "✅ Schema is Reducto-compatible"
                 if validation_result["reducto_compatible"]
                 else f"❌ Schema has {len(validation_result['errors'])} compatibility issues"
             )

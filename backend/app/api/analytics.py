@@ -1,12 +1,14 @@
+import logging
+from datetime import datetime, timedelta
+
 from fastapi import APIRouter, Depends
-from sqlalchemy.orm import Session
 from sqlalchemy import func
+from sqlalchemy.orm import Session
+
 from app.core.database import get_db
 from app.models.document import Document, ExtractedField
 from app.models.schema import Schema
 from app.models.verification import Verification
-from datetime import datetime, timedelta
-import logging
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/analytics", tags=["analytics"])

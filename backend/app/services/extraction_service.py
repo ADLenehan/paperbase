@@ -2,20 +2,21 @@
 Extraction service for multi-template document processing.
 """
 
+import logging
 from datetime import datetime
-from typing import List, Dict, Any, Optional
+from typing import Any, Dict, List, Optional
+
 from sqlalchemy.orm import Session
-from app.models.physical_file import PhysicalFile
-from app.models.extraction import Extraction
-from app.models.template import SchemaTemplate
-from app.models.schema import Schema
+
+from app.core.exceptions import NotFoundError, ProcessingError
 from app.models.document import ExtractedField
-from app.services.reducto_service import ReductoService
+from app.models.extraction import Extraction
+from app.models.physical_file import PhysicalFile
+from app.models.template import SchemaTemplate
 from app.services.elastic_service import ElasticsearchService
+from app.services.reducto_service import ReductoService
 from app.services.settings_service import SettingsService
 from app.services.validation_service import ExtractionValidator, should_flag_for_review
-from app.core.exceptions import ProcessingError, NotFoundError
-import logging
 
 logger = logging.getLogger(__name__)
 

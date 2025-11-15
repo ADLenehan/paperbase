@@ -5,7 +5,7 @@ Reducto returns bboxes as dicts: {left: x, top: y, width: w, height: h, page: p}
 Frontend expects arrays: [x, y, width, height]
 """
 
-from typing import Any, Optional, List, Union
+from typing import Any, List, Optional
 
 
 def normalize_bbox(bbox: Any) -> Optional[List[float]]:

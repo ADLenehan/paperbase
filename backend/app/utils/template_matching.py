@@ -1,14 +1,16 @@
 """
 Template matching utilities for hybrid Elasticsearch + Claude matching
 """
-from typing import Dict, Any, List, Optional
-from sqlalchemy.orm import Session
-from app.models.document import Document
-from app.services.elastic_service import ElasticsearchService
-from app.services.claude_service import ClaudeService
-from app.services.settings_service import SettingsService
 import logging
 import re
+from typing import Any, Dict, List, Optional
+
+from sqlalchemy.orm import Session
+
+from app.models.document import Document
+from app.services.claude_service import ClaudeService
+from app.services.elastic_service import ElasticsearchService
+from app.services.settings_service import SettingsService
 
 logger = logging.getLogger(__name__)
 

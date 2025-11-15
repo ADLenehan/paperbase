@@ -9,11 +9,12 @@ Generate a new key with:
     print(Fernet.generate_key().decode())
 """
 
-import os
 import json
-from cryptography.fernet import Fernet
-from typing import Dict, Any, Optional
 import logging
+import os
+from typing import Any, Dict, Optional
+
+from cryptography.fernet import Fernet
 
 logger = logging.getLogger(__name__)
 

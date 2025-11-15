@@ -5,16 +5,15 @@ Provides clean, structured search and aggregation tools optimized for MCP consum
 All endpoints return structured JSON suitable for tool-based interaction.
 """
 
+import logging
+from typing import Any, Dict, List, Optional
+
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
-from typing import Dict, Any, List, Optional
-from app.services.elastic_service import ElasticsearchService
+
 from app.services.claude_service import ClaudeService
+from app.services.elastic_service import ElasticsearchService
 from app.services.query_optimizer import QueryOptimizer
-from app.core.database import get_db
-from app.utils.query_field_extractor import extract_fields_from_es_query, filter_audit_items_by_fields
-from sqlalchemy.orm import Session
-import logging
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/mcp/search", tags=["mcp-search"])

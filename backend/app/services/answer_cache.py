@@ -8,7 +8,7 @@ identical answers. This provides 90% cost reduction for repeated queries.
 import hashlib
 import logging
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Any
+from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 

@@ -1,6 +1,6 @@
-from pydantic_settings import BaseSettings
-from typing import Optional
 import secrets
+
+from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):

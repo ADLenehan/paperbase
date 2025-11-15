@@ -2,15 +2,17 @@
 File upload service with deduplication support.
 """
 
+import logging
 import os
 from typing import Optional
+
 from fastapi import UploadFile
 from sqlalchemy.orm import Session
-from app.models.physical_file import PhysicalFile
-from app.utils.hashing import calculate_content_hash
+
 from app.core.config import Settings
 from app.core.exceptions import FileUploadError
-import logging
+from app.models.physical_file import PhysicalFile
+from app.utils.hashing import calculate_content_hash
 
 logger = logging.getLogger(__name__)
 settings = Settings()
@@ -173,6 +175,7 @@ class FileService:
     def get_storage_stats(self, db: Session) -> dict:
         """Get storage statistics."""
         from sqlalchemy import func
+
         from app.models.extraction import Extraction
 
         total_files = db.query(func.count(PhysicalFile.id)).scalar()

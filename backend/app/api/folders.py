@@ -2,15 +2,15 @@
 API endpoints for virtual folder browsing and organization.
 """
 
-from typing import List, Optional
-from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.orm import Session
+import logging
+from typing import List
+
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel
+from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.services.folder_service import FolderService
-
-import logging
 
 logger = logging.getLogger(__name__)
 router = APIRouter()

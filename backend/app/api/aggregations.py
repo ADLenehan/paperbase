@@ -5,13 +5,13 @@ Provides comprehensive aggregation capabilities for analytics and insights.
 Supports various aggregation types, multi-dimensional analysis, and nested aggregations.
 """
 
-from fastapi import APIRouter, HTTPException, Depends
-from pydantic import BaseModel, Field
-from typing import Dict, Any, List, Optional
-from app.services.elastic_service import ElasticsearchService
-from app.core.database import get_db
-from sqlalchemy.orm import Session
 import logging
+from typing import Any, Dict, List, Optional
+
+from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel, Field
+
+from app.services.elastic_service import ElasticsearchService
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/aggregations", tags=["aggregations"])

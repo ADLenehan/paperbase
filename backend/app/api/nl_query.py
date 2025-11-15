@@ -1,19 +1,20 @@
-from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.orm import Session
-from typing import List, Dict, Any, Optional
-from pydantic import BaseModel
-from datetime import datetime, timedelta
-import logging
-import json
 import hashlib
+import json
+import logging
+from datetime import datetime
+from typing import Any, Dict, List, Optional
+
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
+from sqlalchemy.orm import Session
 
 from app.core.database import get_db
+from app.models.extraction import Extraction
+from app.models.query_pattern import QueryCache
+from app.models.schema import Schema
 from app.services.claude_service import ClaudeService
 from app.services.elastic_service import ElasticsearchService
 from app.services.schema_registry import SchemaRegistry
-from app.models.schema import Schema, FieldDefinition
-from app.models.extraction import Extraction
-from app.models.query_pattern import QueryPattern, QueryCache
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/query", tags=["natural-language-query"])

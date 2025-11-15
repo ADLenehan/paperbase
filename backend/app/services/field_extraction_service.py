@@ -2,18 +2,19 @@
 
 import asyncio
 import logging
-from typing import Dict, Any, List
+from datetime import datetime
+from typing import Any, Dict, List
+
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
-from datetime import datetime
 
 from app.models.background_job import BackgroundJob
 from app.models.document import Document, ExtractedField
-from app.models.verification import Verification
 from app.models.schema import Schema
+from app.models.verification import Verification
 from app.services.claude_service import ClaudeService
-from app.services.reducto_service import ReductoService
 from app.services.elastic_service import ElasticsearchService
+from app.services.reducto_service import ReductoService
 
 logger = logging.getLogger(__name__)
 

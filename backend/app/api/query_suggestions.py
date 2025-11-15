@@ -1,10 +1,12 @@
+import logging
+from typing import List, Optional
+
 from fastapi import APIRouter, Depends, HTTPException
-from typing import Optional, List
 from sqlalchemy.orm import Session
+
 from app.core.database import get_db
 from app.models.schema import Schema
 from app.services.elastic_service import ElasticsearchService
-import logging
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/search/suggestions", tags=["search"])

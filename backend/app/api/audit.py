@@ -1,18 +1,19 @@
+import logging
+from datetime import datetime
+from typing import List, Optional
+
 from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel
+from sqlalchemy import and_
 from sqlalchemy.orm import Session
-from sqlalchemy import and_, func
-from typing import Optional, List
+
 from app.core.database import get_db
-from app.core.config import settings as app_settings
 from app.models.document import Document, ExtractedField
 from app.models.verification import Verification
+from app.services.claude_service import ClaudeService
 from app.services.elastic_service import ElasticsearchService
 from app.services.settings_service import SettingsService
-from app.services.claude_service import ClaudeService
 from app.utils.bbox_utils import normalize_bbox
-from datetime import datetime
-from pydantic import BaseModel
-import logging
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/audit", tags=["audit"])

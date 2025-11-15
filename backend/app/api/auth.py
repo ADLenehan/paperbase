@@ -10,23 +10,24 @@ Authentication Methods:
 Both methods use the same get_current_user() dependency for authorization.
 """
 
-from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.orm import Session
-from pydantic import BaseModel, EmailStr
-from typing import Optional, List
 from datetime import datetime, timedelta
+from typing import List, Optional
 
-from app.core.database import get_db
+from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import BaseModel, EmailStr
+from sqlalchemy.orm import Session
+
 from app.core.auth import (
     create_access_token,
     create_api_key,
+    get_current_active_admin,
+    get_current_user,
     hash_password,
     verify_password,
-    get_current_user,
-    get_current_active_admin
 )
-from app.models.settings import User
+from app.core.database import get_db
 from app.models.permissions import APIKey
+from app.models.settings import User
 
 router = APIRouter(prefix="/api/auth", tags=["Authentication"])
 

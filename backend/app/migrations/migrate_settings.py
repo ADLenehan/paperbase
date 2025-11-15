@@ -16,10 +16,12 @@ from pathlib import Path
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-from sqlalchemy.orm import Session
-from app.core.database import engine, SessionLocal
-from app.models.settings import Settings
 import logging
+
+from sqlalchemy.orm import Session
+
+from app.core.database import SessionLocal
+from app.models.settings import Settings
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -72,7 +74,7 @@ def migrate_settings(db: Session, dry_run: bool = False):
             logger.info(f"\n⏭️  No '{old_key}' settings found to rename")
 
     # Step 2: Remove obsolete settings
-    logger.info(f"\n🗑️  Removing obsolete settings:")
+    logger.info("\n🗑️  Removing obsolete settings:")
     for key in to_remove:
         settings_to_remove = db.query(Settings).filter(Settings.key == key).all()
 

@@ -1,9 +1,9 @@
 """Background job model for tracking long-running tasks"""
 
-from sqlalchemy import Column, Integer, String, Float, DateTime, JSON
+from sqlalchemy import JSON, Column, DateTime, Integer, String
 from sqlalchemy.sql import func
+
 from app.core.database import Base
-from datetime import datetime
 
 
 class BackgroundJob(Base):

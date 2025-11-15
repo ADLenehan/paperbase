@@ -18,18 +18,17 @@ Security:
 - Session validation
 """
 
-from fastapi import APIRouter, Depends, HTTPException, status, Request, Response
-from fastapi.responses import RedirectResponse
-from sqlalchemy.orm import Session
-from pydantic import BaseModel, EmailStr
-from typing import Optional, Dict, Any
-from datetime import datetime
 import logging
+from datetime import datetime
 
-from app.core.database import get_db
+from fastapi import APIRouter, Depends, HTTPException, Request, status
+from pydantic import BaseModel
+from sqlalchemy.orm import Session
+
 from app.core.auth import create_access_token, get_current_user
+from app.core.database import get_db
 from app.models.settings import User
-from app.services.oauth_service import get_oauth_service, OAuthService
+from app.services.oauth_service import OAuthService, get_oauth_service
 
 logger = logging.getLogger(__name__)
 

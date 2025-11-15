@@ -11,24 +11,28 @@ Endpoints for sharing documents with users and managing access:
 Enables collaboration and secure document distribution.
 """
 
-from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy.orm import Session, joinedload
-from typing import List, Optional
-from pydantic import BaseModel, Field, HttpUrl
-from datetime import datetime, timedelta
 import logging
+from datetime import datetime, timedelta
+from typing import List, Optional
 
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
+from sqlalchemy.orm import Session, joinedload
+
+from app.core.auth import get_current_user
+from app.core.config import settings
 from app.core.database import get_db
-from app.core.auth import get_current_user, get_current_active_admin
+from app.core.exceptions import PermissionDeniedError, ResourceNotFoundError
 from app.models.document import Document
 from app.models.permissions import (
-    DocumentPermission, FolderPermission, ShareLink,
-    ShareLinkAccessLevel, PermissionAction
+    DocumentPermission,
+    FolderPermission,
+    PermissionAction,
+    ShareLink,
+    ShareLinkAccessLevel,
 )
 from app.models.settings import User
 from app.services.permission_service import PermissionService
-from app.core.exceptions import PermissionDeniedError, ResourceNotFoundError
-from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/sharing", tags=["sharing"])

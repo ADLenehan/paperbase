@@ -1,10 +1,37 @@
+import logging
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+
+from app.api import (
+    aggregations,
+    analytics,
+    audit,
+    auth,
+    bulk_upload,
+    documents,
+    export,
+    extractions,
+    files,
+    folders,
+    mcp_search,
+    nl_query,
+    oauth,
+    onboarding,
+    organizations,
+    query_suggestions,
+    rematch,
+    roles,
+    search,
+    sharing,
+    templates,
+    users,
+    verification,
+)
+from app.api import settings as settings_api
 from app.core.config import settings
-from app.core.database import engine, Base
+from app.core.database import Base, engine
 from app.core.error_handlers import register_error_handlers
-from app.api import onboarding, documents, search, verification, analytics, templates, bulk_upload, rematch, extractions, folders, nl_query, audit, files, settings as settings_api, export, aggregations, mcp_search, auth, users, roles, sharing, query_suggestions, oauth, organizations
-import logging
 
 # Configure logging
 logging.basicConfig(

@@ -11,19 +11,20 @@ Endpoints for managing users, including:
 All endpoints require appropriate permissions.
 """
 
-from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy.orm import Session
-from typing import List, Optional
-from pydantic import BaseModel, EmailStr, Field
-from datetime import datetime
 import logging
+from datetime import datetime
+from typing import List, Optional
 
+from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel, EmailStr
+from sqlalchemy.orm import Session
+
+from app.core.auth import get_current_user
 from app.core.database import get_db
-from app.core.auth import get_current_user, get_current_active_admin
-from app.models.settings import User, Organization
-from app.models.permissions import PermissionAction
-from app.services.permission_service import PermissionService
 from app.core.exceptions import PermissionDeniedError, ResourceNotFoundError
+from app.models.permissions import PermissionAction
+from app.models.settings import Organization, User
+from app.services.permission_service import PermissionService
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/users", tags=["users"])
@@ -447,7 +448,7 @@ async def assign_role_to_user(
 
     return {
         "success": True,
-        "message": f"Role assigned successfully",
+        "message": "Role assigned successfully",
         "user_role_id": user_role.id,
         "role_id": user_role.role_id,
         "scope": user_role.scope.value

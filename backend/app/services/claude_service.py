@@ -1,11 +1,13 @@
-import anthropic
-from typing import Dict, Any, List, Optional
-from datetime import datetime
 import calendar
-from app.core.config import settings
-from app.core.exceptions import ClaudeError, SchemaError
 import json
 import logging
+from datetime import datetime
+from typing import Any, Dict, List, Optional
+
+import anthropic
+
+from app.core.config import settings
+from app.core.exceptions import ClaudeError, SchemaError
 
 logger = logging.getLogger(__name__)
 
@@ -1380,7 +1382,6 @@ Keep it concise (2-3 sentences)."""
             }
         """
         from datetime import datetime, timedelta
-        import calendar
 
         # Calculate current date context for smart date parsing
         today = datetime.now()
@@ -1451,7 +1452,7 @@ Keep it concise (2-3 sentences)."""
 ❌ NOT IN FIELDS (requires full_text search): {', '.join(not_extracted)}
    → Use match on full_text or _all_text only
 """
-                template_routing += f"""
+                template_routing += """
 ⚠️  Template filter is automatic - DO NOT add template_name to your query filters
 """
 
@@ -1716,19 +1717,19 @@ Now parse the user query above and return ONLY the JSON response."""
 
                 guide_parts.append(f"Example {example_counter}: Field-Specific Search")
                 guide_parts.append(f"  User Query: \"what is the {field_terms}?\"")
-                guide_parts.append(f"  Analysis:")
+                guide_parts.append("  Analysis:")
                 guide_parts.append(f"    - Key terms: {', '.join(field_terms.split())}")
                 guide_parts.append(f"    - Matching field: '{field}' (contains matching terms)")
-                guide_parts.append(f"    - Strategy: Search specific field with high boost")
-                guide_parts.append(f"  ")
-                guide_parts.append(f"  Generated Query:")
-                guide_parts.append(f"  {{")
-                guide_parts.append(f"    \"multi_match\": {{")
+                guide_parts.append("    - Strategy: Search specific field with high boost")
+                guide_parts.append("  ")
+                guide_parts.append("  Generated Query:")
+                guide_parts.append("  {")
+                guide_parts.append("    \"multi_match\": {")
                 guide_parts.append(f"      \"query\": \"{field_terms}\",")
                 guide_parts.append(f"      \"fields\": [\"{field}^10\", \"full_text^1\"],")
-                guide_parts.append(f"      \"type\": \"best_fields\"")
-                guide_parts.append(f"    }}")
-                guide_parts.append(f"  }}")
+                guide_parts.append("      \"type\": \"best_fields\"")
+                guide_parts.append("    }")
+                guide_parts.append("  }")
                 guide_parts.append("")
                 example_counter += 1
 
@@ -1736,22 +1737,22 @@ Now parse the user query above and return ONLY the JSON response."""
         if len(canonical_mapping.get("amount", [])) > 1:
             amount_fields = canonical_mapping["amount"]
             guide_parts.append(f"Example {example_counter}: Cross-Template Canonical Search")
-            guide_parts.append(f"  User Query: \"show me amounts over $1000\"")
-            guide_parts.append(f"  Analysis:")
-            guide_parts.append(f"    - Key term: 'amount' (canonical category)")
+            guide_parts.append("  User Query: \"show me amounts over $1000\"")
+            guide_parts.append("  Analysis:")
+            guide_parts.append("    - Key term: 'amount' (canonical category)")
             guide_parts.append(f"    - Mapped to fields: {', '.join(amount_fields)}")
-            guide_parts.append(f"    - Strategy: Search ALL amount fields across templates")
-            guide_parts.append(f"  ")
-            guide_parts.append(f"  Generated Query:")
-            guide_parts.append(f"  {{")
-            guide_parts.append(f"    \"bool\": {{")
-            guide_parts.append(f"      \"should\": [")
+            guide_parts.append("    - Strategy: Search ALL amount fields across templates")
+            guide_parts.append("  ")
+            guide_parts.append("  Generated Query:")
+            guide_parts.append("  {")
+            guide_parts.append("    \"bool\": {")
+            guide_parts.append("      \"should\": [")
             for field in amount_fields:
                 guide_parts.append(f"        {{\"range\": {{\"{field}\": {{\"gte\": 1000}}}}}},")
-            guide_parts.append(f"      ],")
-            guide_parts.append(f"      \"minimum_should_match\": 1")
-            guide_parts.append(f"    }}")
-            guide_parts.append(f"  }}")
+            guide_parts.append("      ],")
+            guide_parts.append("      \"minimum_should_match\": 1")
+            guide_parts.append("    }")
+            guide_parts.append("  }")
             guide_parts.append("")
             example_counter += 1
 

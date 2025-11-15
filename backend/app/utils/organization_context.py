@@ -8,15 +8,16 @@ This module provides utilities to enforce organization-scoped queries.
 """
 
 from typing import Optional
+
 from fastapi import Depends, HTTPException, status
-from sqlalchemy.orm import Session, Query
+from sqlalchemy.orm import Query, Session
 
 from app.core.auth import get_current_user
 from app.core.database import get_db
-from app.models.settings import User, Organization
 from app.models.document import Document
-from app.models.schema import Schema
 from app.models.physical_file import PhysicalFile
+from app.models.schema import Schema
+from app.models.settings import Organization, User
 
 
 class OrganizationContext:

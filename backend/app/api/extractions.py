@@ -3,18 +3,18 @@ API endpoints for extraction management.
 Supports multi-template extraction and batch processing.
 """
 
-from typing import List, Optional
-from fastapi import APIRouter, Depends, File, UploadFile, BackgroundTasks, HTTPException
-from sqlalchemy.orm import Session
+import logging
+from typing import List
+
+from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, UploadFile
 from pydantic import BaseModel
+from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.services.file_service import FileService
-from app.services.extraction_service import ExtractionService
-from app.models.physical_file import PhysicalFile
 from app.models.extraction import Extraction
-
-import logging
+from app.models.physical_file import PhysicalFile
+from app.services.extraction_service import ExtractionService
+from app.services.file_service import FileService
 
 logger = logging.getLogger(__name__)
 router = APIRouter()

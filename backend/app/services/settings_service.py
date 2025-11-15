@@ -8,11 +8,13 @@ Resolution order:
 4. Hardcoded defaults (from models.settings.DEFAULT_SETTINGS)
 """
 
-from sqlalchemy.orm import Session
-from app.models.settings import Settings, Organization, User, DEFAULT_SETTINGS
-from typing import Optional, Any, Dict
 import json
 import logging
+from typing import Any, Dict, Optional
+
+from sqlalchemy.orm import Session
+
+from app.models.settings import DEFAULT_SETTINGS, Organization, Settings, User
 
 logger = logging.getLogger(__name__)
 

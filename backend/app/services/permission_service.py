@@ -18,21 +18,31 @@ Permission Resolution Order:
 5. Public access (if resource is public)
 """
 
-from sqlalchemy.orm import Session, joinedload
-from sqlalchemy import and_, or_
-from typing import List, Optional, Dict, Any, Tuple
-from datetime import datetime
 import logging
 import secrets
+from datetime import datetime
+from typing import Any, Dict, List, Optional
 
-from app.models.permissions import (
-    Role, Permission, UserRole, DocumentPermission, FolderPermission,
-    ShareLink, PermissionAuditLog, PermissionAction, PermissionScope,
-    RoleType, ShareLinkAccessLevel, DEFAULT_PERMISSIONS, DEFAULT_ROLES
-)
-from app.models.settings import User, Organization
-from app.models.document import Document
+from sqlalchemy import and_, or_
+from sqlalchemy.orm import Session, joinedload
+
 from app.core.exceptions import PermissionDeniedError, ResourceNotFoundError
+from app.models.document import Document
+from app.models.permissions import (
+    DEFAULT_PERMISSIONS,
+    DEFAULT_ROLES,
+    DocumentPermission,
+    FolderPermission,
+    Permission,
+    PermissionAction,
+    PermissionAuditLog,
+    PermissionScope,
+    Role,
+    ShareLink,
+    ShareLinkAccessLevel,
+    UserRole,
+)
+from app.models.settings import User
 
 logger = logging.getLogger(__name__)
 

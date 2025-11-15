@@ -10,22 +10,24 @@ Endpoints for managing roles and permissions:
 System roles (Admin, Editor, Viewer) cannot be modified or deleted.
 """
 
-from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy.orm import Session, joinedload
-from typing import List, Optional
-from pydantic import BaseModel, Field
-from datetime import datetime
 import logging
+from datetime import datetime
+from typing import List, Optional
 
+from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel, Field
+from sqlalchemy.orm import Session, joinedload
+
+from app.core.auth import get_current_user
 from app.core.database import get_db
-from app.core.auth import get_current_user, get_current_active_admin
 from app.models.permissions import (
-    Role, Permission, RoleType, PermissionAction,
-    DEFAULT_PERMISSIONS, DEFAULT_ROLES
+    Permission,
+    PermissionAction,
+    Role,
+    RoleType,
 )
 from app.models.settings import User
 from app.services.permission_service import PermissionService
-from app.core.exceptions import PermissionDeniedError
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/roles", tags=["roles"])
@@ -176,8 +178,9 @@ async def list_roles(
     roles = query.order_by(Role.is_system_role.desc(), Role.name).all()
 
     # Count users for each role
-    from app.models.permissions import UserRole
     from sqlalchemy import func
+
+    from app.models.permissions import UserRole
 
     role_user_counts = dict(
         db.query(UserRole.role_id, func.count(UserRole.user_id))

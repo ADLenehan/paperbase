@@ -9,17 +9,19 @@ Usage:
 
 import sys
 from pathlib import Path
+
 sys.path.append(str(Path(__file__).parent.parent.parent))
 
-from sqlalchemy.orm import Session
-from datetime import datetime
-from app.core.database import SessionLocal, engine, Base
-from app.models.document import Document, ExtractedField
-from app.models.physical_file import PhysicalFile
-from app.models.extraction import Extraction
-from app.models.batch import Batch
-from app.utils.hashing import calculate_file_hash
 import logging
+
+from sqlalchemy.orm import Session
+
+from app.core.database import Base, SessionLocal, engine
+from app.models.batch import Batch
+from app.models.document import Document, ExtractedField
+from app.models.extraction import Extraction
+from app.models.physical_file import PhysicalFile
+from app.utils.hashing import calculate_file_hash
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -165,7 +167,7 @@ def migrate_documents_to_extractions(db: Session, dry_run: bool = False):
             error_count += 1
 
     logger.info("=" * 60)
-    logger.info(f"Migration complete!")
+    logger.info("Migration complete!")
     logger.info(f"  Migrated: {migrated_count}")
     logger.info(f"  Skipped:  {skipped_count}")
     logger.info(f"  Errors:   {error_count}")
@@ -204,7 +206,7 @@ def rollback_migration(db: Session):
 
     db.commit()
 
-    logger.info(f"Rollback complete:")
+    logger.info("Rollback complete:")
     logger.info(f"  Deleted {extraction_count} extractions")
     logger.info(f"  Deleted {file_count} physical files")
     logger.info(f"  Deleted {batch_count} batches")

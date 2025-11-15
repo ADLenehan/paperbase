@@ -1,11 +1,13 @@
+import logging
+import os
+from pathlib import Path as PathLib
+
 from fastapi import APIRouter, Depends, HTTPException, Path
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
+
 from app.core.database import get_db
 from app.models.document import Document
-from pathlib import Path as PathLib
-import os
-import logging
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/files", tags=["files"])
