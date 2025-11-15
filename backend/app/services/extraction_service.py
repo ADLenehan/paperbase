@@ -2,20 +2,21 @@
 Extraction service for multi-template document processing.
 """
 
+import logging
 from datetime import datetime
-from typing import List, Dict, Any, Optional
+from typing import Any, Dict, List, Optional
+
 from sqlalchemy.orm import Session
-from app.models.physical_file import PhysicalFile
-from app.models.extraction import Extraction
-from app.models.template import SchemaTemplate
-from app.models.schema import Schema
+
+from app.core.exceptions import NotFoundError, ProcessingError
 from app.models.document import ExtractedField
+from app.models.extraction import Extraction
+from app.models.physical_file import PhysicalFile
+from app.models.template import SchemaTemplate
+from app.services.postgres_service import PostgresService
 from app.services.reducto_service import ReductoService
-from app.services.elastic_service import ElasticsearchService
 from app.services.settings_service import SettingsService
 from app.services.validation_service import ExtractionValidator, should_flag_for_review
-from app.core.exceptions import ProcessingError, NotFoundError
-import logging
 
 logger = logging.getLogger(__name__)
 
@@ -26,9 +27,10 @@ class ExtractionService:
     Supports multi-template extraction (same file, different templates).
     """
 
-    def __init__(self):
+    def __init__(self, db=None):
         self.reducto_service = ReductoService()
-        self.elastic_service = ElasticsearchService()
+        self.db = db
+        self.postgres_service = PostgresService(db) if db else None
 
     async def create_extraction(
         self,
@@ -213,7 +215,7 @@ class ExtractionService:
 
             # Step 4: Index in Elasticsearch
             es_doc_id = f"extraction_{extraction.id}"
-            await self.elastic_service.index_document(
+            await self.postgres_service.index_document(
                 document_id=extraction.id,
                 filename=physical_file.filename,
                 extracted_fields=extracted_data,

@@ -1,6 +1,6 @@
-from pydantic_settings import BaseSettings
-from typing import Optional
 import secrets
+
+from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
@@ -8,11 +8,8 @@ class Settings(BaseSettings):
     REDUCTO_API_KEY: str
     ANTHROPIC_API_KEY: str
 
-    # Database
-    DATABASE_URL: str = "sqlite:///./paperbase.db"
-
-    # Elasticsearch
-    ELASTICSEARCH_URL: str = "http://localhost:9200"
+    # Database (PostgreSQL by default, SQLite for legacy/testing)
+    DATABASE_URL: str = "postgresql://paperbase:paperbase@localhost:5432/paperbase"
 
     # Server
     BACKEND_HOST: str = "0.0.0.0"

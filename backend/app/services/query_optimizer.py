@@ -12,10 +12,9 @@ Key Features:
 - Query type selection (exact, fuzzy, semantic, hybrid)
 """
 
-from typing import Dict, Any, List, Optional
-from datetime import datetime, timedelta
-import re
 import logging
+import re
+from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 

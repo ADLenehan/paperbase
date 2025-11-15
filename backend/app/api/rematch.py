@@ -1,17 +1,19 @@
 """
 Endpoint for retroactively matching existing documents to templates
 """
+import logging
+from typing import Any, Dict
+
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.orm import Session
 from sqlalchemy import or_
-from typing import Dict, Any, List
+from sqlalchemy.orm import Session
+
 from app.core.database import get_db
 from app.models.document import Document
 from app.models.template import SchemaTemplate
-from app.services.elastic_service import ElasticsearchService
 from app.services.claude_service import ClaudeService
+from app.services.postgres_service import PostgresService
 from app.utils.template_matching import hybrid_match_document
-import logging
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/rematch", tags=["rematch"])
@@ -47,7 +49,7 @@ async def rematch_all_documents(
     logger.info(f"Rematching {len(unmatched_docs)} documents")
 
     # Initialize services
-    elastic_service = ElasticsearchService()
+    postgres_service = PostgresService(db)
     claude_service = ClaudeService()
 
     # Get all available templates
@@ -157,7 +159,7 @@ async def rematch_single_document(
         )
 
     # Initialize services
-    elastic_service = ElasticsearchService()
+    postgres_service = PostgresService(db)
     claude_service = ClaudeService()
 
     # Get all available templates
@@ -208,7 +210,7 @@ async def rematch_single_document(
             "confidence": match_result["confidence"],
             "match_source": match_result.get("match_source"),
             "status": doc.status,
-            "message": f"Document rematched successfully"
+            "message": "Document rematched successfully"
         }
 
     except Exception as e:

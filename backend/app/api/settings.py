@@ -6,14 +6,16 @@ For MVP:
 - Future: Extract org_id/user_id from JWT token
 """
 
-from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy.orm import Session
-from app.core.database import get_db
-from app.services.settings_service import SettingsService
-from app.models.settings import DEFAULT_SETTINGS
-from pydantic import BaseModel, Field
-from typing import Optional, Dict, Any, List
 import logging
+from typing import Any, List, Optional
+
+from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel, Field
+from sqlalchemy.orm import Session
+
+from app.core.database import get_db
+from app.models.settings import DEFAULT_SETTINGS
+from app.services.settings_service import SettingsService
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/settings", tags=["settings"])

@@ -3,13 +3,15 @@ Virtual folder organization service.
 Provides folder browsing and reorganization without physical file duplication.
 """
 
-from typing import List, Dict, Any, Optional
-from sqlalchemy.orm import Session
+import logging
+from typing import Any, Dict, List, Optional
+
 from sqlalchemy import func
+from sqlalchemy.orm import Session
+
 from app.models.extraction import Extraction
 from app.models.physical_file import PhysicalFile
 from app.models.template import SchemaTemplate
-import logging
 
 logger = logging.getLogger(__name__)
 

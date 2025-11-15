@@ -9,19 +9,20 @@ Supports two authentication methods:
 2. API keys (for MCP/programmatic access) - long-lived, revokable
 """
 
+import secrets
 from datetime import datetime, timedelta
 from typing import Optional, Tuple
-import secrets
+
 import jwt
-from passlib.context import CryptContext
 from fastapi import Depends, HTTPException, status
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from passlib.context import CryptContext
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.database import get_db
-from app.models.settings import User
 from app.models.permissions import APIKey
+from app.models.settings import User
 
 # Password hashing context
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")

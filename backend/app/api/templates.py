@@ -1,10 +1,12 @@
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
+
 from app.core.database import get_db
-from app.models.template import SchemaTemplate
-from app.models.schema import Schema
 from app.data.templates import BUILTIN_TEMPLATES
-import logging
+from app.models.schema import Schema
+from app.models.template import SchemaTemplate
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/templates", tags=["templates"])

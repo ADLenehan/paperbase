@@ -1,15 +1,20 @@
-from fastapi import APIRouter, Depends, HTTPException
-from typing import Optional, Dict, Any, List
-from pydantic import BaseModel
-from app.services.elastic_service import ElasticsearchService
-from app.services.claude_service import ClaudeService
-from app.services.query_optimizer import QueryOptimizer
-from app.services.answer_cache import get_answer_cache
-from app.core.database import get_db
-from app.models.schema import Schema, FieldDefinition
-from app.utils.query_field_extractor import extract_fields_from_es_query, filter_audit_items_by_fields
-from sqlalchemy.orm import Session
 import logging
+from typing import Any, Dict, List, Optional
+
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
+from sqlalchemy.orm import Session
+
+from app.core.database import get_db
+from app.models.schema import Schema
+from app.services.answer_cache import get_answer_cache
+from app.services.claude_service import ClaudeService
+from app.services.postgres_service import PostgresService
+from app.services.query_optimizer import QueryOptimizer
+from app.utils.query_field_extractor import (
+    extract_fields_from_es_query,
+    filter_audit_items_by_fields,
+)
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/search", tags=["search"])
@@ -43,13 +48,14 @@ async def search_documents(
         folder_path: Optional folder path to restrict search (e.g., "invoices" or "invoices/acme-corp")
         conversation_history: Optional conversation context for follow-up questions
     """
-    from app.services.schema_registry import SchemaRegistry
-    from app.models.query_pattern import QueryCache
     import hashlib
     from datetime import datetime
 
+    from app.models.query_pattern import QueryCache
+    from app.services.schema_registry import SchemaRegistry
+
     claude_service = ClaudeService()
-    elastic_service = ElasticsearchService()
+    postgres_service = PostgresService(db)
     schema_registry = SchemaRegistry(db)
 
     # Initialize QueryOptimizer with SchemaRegistry for dynamic field resolution
@@ -86,7 +92,7 @@ async def search_documents(
             field_lineage = extract_fields_from_es_query(es_query)
             logger.info(f"Extracted {len(field_lineage['queried_fields'])} queried fields from cached query")
 
-            search_results = await elastic_service.search(
+            search_results = await postgres_service.search(
                 query=None,
                 filters=None,
                 custom_query=es_query,
@@ -106,8 +112,8 @@ async def search_documents(
 
             # Get audit metadata for low-confidence fields
             from app.utils.audit_helpers import (
+                get_confidence_summary,
                 get_low_confidence_fields_for_documents,
-                get_confidence_summary
             )
 
             document_ids = [doc.get("id") for doc in search_results.get("documents", []) if doc.get("id")]
@@ -136,8 +142,8 @@ async def search_documents(
             confidence_summary = await get_confidence_summary(document_ids=document_ids, db=db)
 
             # NEW: Save query history for viewing source documents
-            from app.models.query_history import QueryHistory
             from app.core.config import settings
+            from app.models.query_history import QueryHistory
 
             query_history = QueryHistory.create_from_search(
                 query=request.query,
@@ -168,7 +174,7 @@ async def search_documents(
                 "explanation": cached_result.explanation,
                 "results": search_results.get("documents", []),
                 "total": search_results.get("total", 0),
-                "elasticsearch_query": {"query": es_query},
+                "sql_query": {"query": es_query},  # ES query format for backward compatibility
                 "cached": True,
                 "optimization_used": False,
                 "folder_path": request.folder_path,
@@ -321,7 +327,7 @@ async def search_documents(
                     logger.warning(f"Unknown aggregation type '{agg_type}', defaulting to 'stats'")
 
                 # Execute aggregation
-                agg_results = await elastic_service.get_aggregations(
+                agg_results = await postgres_service.get_aggregations(
                     field=agg_field,
                     agg_type=es_agg_type,
                     filters=es_query
@@ -360,8 +366,8 @@ async def search_documents(
 
         # Execute normal search if not aggregation query (or if aggregation validation failed)
         if query_type != "aggregation" or not aggregation_spec:
-            # Execute ES query for normal search
-            search_results = await elastic_service.search(
+            # Execute PostgreSQL query for normal search
+            search_results = await postgres_service.search(
                 query=None,
                 filters=None,
                 custom_query=es_query,
@@ -399,8 +405,8 @@ async def search_documents(
 
         # Get audit metadata for low-confidence fields
         from app.utils.audit_helpers import (
+            get_confidence_summary,
             get_low_confidence_fields_for_documents,
-            get_confidence_summary
         )
 
         # Skip audit metadata for aggregation queries (no individual documents to audit)
@@ -454,8 +460,8 @@ async def search_documents(
             logger.warning(f"Failed to cache query: {cache_error}")
 
         # NEW: Save query history for viewing source documents
-        from app.models.query_history import QueryHistory
         from app.core.config import settings
+        from app.models.query_history import QueryHistory
 
         # Extract document IDs from search results (skip for aggregation queries)
         if query_type == "aggregation" and aggregation_spec:
@@ -492,7 +498,7 @@ async def search_documents(
             "explanation": explanation,
             "results": search_results.get("documents", []),
             "total": search_results.get("total", 0),
-            "elasticsearch_query": {"query": es_query},
+            "sql_query": {"query": es_query},  # ES query format for backward compatibility
             "cached": False,
             "optimization_used": not use_claude,
             "query_confidence": query_analysis["confidence"],
@@ -660,17 +666,17 @@ def _add_template_filter(es_query: Dict[str, Any], template_id: str, db: Session
 
 
 @router.get("/filters")
-async def get_available_filters():
+async def get_available_filters(db: Session = Depends(get_db)):
     """Get available filter options and value distributions"""
 
-    elastic_service = ElasticsearchService()
+    postgres_service = PostgresService(db)
 
     try:
         # Get aggregations for common fields
         aggregations = {}
 
         # Example: Get status distribution
-        status_agg = await elastic_service.get_aggregations("status")
+        status_agg = await postgres_service.get_aggregations("status")
         aggregations["status"] = status_agg
 
         return {
@@ -695,31 +701,28 @@ async def get_available_filters():
 
 
 @router.get("/index-stats")
-async def get_index_statistics():
+async def get_index_statistics(db: Session = Depends(get_db)):
     """
-    Get Elasticsearch index statistics for monitoring and optimization.
+    Get PostgreSQL index statistics for monitoring and optimization.
 
     Returns:
-        Document count, storage size, field count, and field limit utilization.
+        Document count, storage size, field count, and index health.
 
     Useful for:
     - Monitoring index health
-    - Detecting mapping explosion risk
-    - Capacity planning
+    - Database capacity planning
+    - Performance optimization
     """
-    elastic_service = ElasticsearchService()
+    postgres_service = PostgresService(db)
 
     try:
-        stats = await elastic_service.get_index_stats()
+        stats = await postgres_service.get_index_stats()
 
-        # Add health status based on utilization
-        field_utilization = stats["field_utilization_pct"]
-        if field_utilization >= 90:
-            health_status = "critical"
-            health_message = "Field limit nearly exhausted - risk of mapping explosion"
-        elif field_utilization >= 70:
+        # Add health status based on document count
+        doc_count = stats.get("document_count", 0)
+        if doc_count >= 100000:
             health_status = "warning"
-            health_message = "Field count is high - monitor for unexpected growth"
+            health_message = "Large document count - consider partitioning"
         else:
             health_status = "healthy"
             health_message = "Index is operating within normal parameters"
@@ -741,24 +744,22 @@ def _get_index_recommendations(stats: Dict[str, Any]) -> List[str]:
     recommendations = []
 
     # Storage recommendations
-    if stats["storage_size_mb"] > 1000:
-        recommendations.append("Consider implementing index lifecycle management for large indices")
-
-    # Field count recommendations
-    if stats["field_utilization_pct"] > 70:
-        recommendations.append("Review schema definitions to remove unused fields")
-        recommendations.append("Consider consolidating similar fields across templates")
-
-    if stats["field_utilization_pct"] > 90:
-        recommendations.append("URGENT: Increase field limit or restructure schemas to avoid mapping rejection")
+    storage_mb = stats.get("storage_size_mb", 0)
+    if storage_mb > 1000:
+        recommendations.append("Consider implementing table partitioning for large datasets")
 
     # Document count recommendations
-    if stats["document_count"] > 100000:
-        recommendations.append("Consider scaling to multiple shards for better performance")
-        recommendations.append("Enable replicas for production redundancy")
+    doc_count = stats.get("document_count", 0)
+    if doc_count > 100000:
+        recommendations.append("Consider table partitioning by date or schema for better performance")
+        recommendations.append("Review index usage and add missing indexes for common queries")
 
-    if stats["document_count"] > 1000000:
-        recommendations.append("Migrate to time-based indices for better manageability")
+    if doc_count > 1000000:
+        recommendations.append("Consider PostgreSQL read replicas for scaling read operations")
+
+    # Index recommendations
+    if stats.get("missing_indexes"):
+        recommendations.append("Add recommended indexes for better query performance")
 
     if not recommendations:
         recommendations.append("Index is healthy - no action needed")

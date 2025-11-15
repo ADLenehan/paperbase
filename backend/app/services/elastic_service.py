@@ -1,8 +1,10 @@
-from elasticsearch import AsyncElasticsearch
-from typing import Dict, Any, List, Optional
-from app.core.config import settings
-from datetime import datetime
 import logging
+from datetime import datetime
+from typing import Any, Dict, List, Optional
+
+from elasticsearch import AsyncElasticsearch
+
+from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 

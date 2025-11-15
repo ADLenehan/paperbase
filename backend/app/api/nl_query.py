@@ -1,19 +1,20 @@
-from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.orm import Session
-from typing import List, Dict, Any, Optional
-from pydantic import BaseModel
-from datetime import datetime, timedelta
-import logging
-import json
 import hashlib
+import json
+import logging
+from datetime import datetime
+from typing import Any, Dict, List, Optional
+
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
+from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.services.claude_service import ClaudeService
-from app.services.elastic_service import ElasticsearchService
-from app.services.schema_registry import SchemaRegistry
-from app.models.schema import Schema, FieldDefinition
 from app.models.extraction import Extraction
-from app.models.query_pattern import QueryPattern, QueryCache
+from app.models.query_pattern import QueryCache
+from app.models.schema import Schema
+from app.services.claude_service import ClaudeService
+from app.services.postgres_service import PostgresService
+from app.services.schema_registry import SchemaRegistry
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/query", tags=["natural-language-query"])
@@ -52,7 +53,7 @@ async def natural_language_query(
     - "What was the average invoice amount last month?"
     """
     claude_service = ClaudeService()
-    elastic_service = ElasticsearchService()
+    postgres_service = PostgresService(db)
     schema_registry = SchemaRegistry(db)
 
     try:
@@ -69,7 +70,7 @@ async def natural_language_query(
             db.commit()
 
             # Execute cached ES query
-            search_results = await elastic_service.search(
+            search_results = await postgres_service.search(
                 query=None,
                 filters=None,
                 custom_query=cached_result.es_query.get("query"),
@@ -149,7 +150,7 @@ async def natural_language_query(
         es_query = parsed_query.get("elasticsearch_query", {})
 
         # Execute the query
-        search_results = await elastic_service.search(
+        search_results = await postgres_service.search(
             query=None,
             filters=None,
             custom_query=es_query.get("query"),
@@ -223,7 +224,7 @@ async def natural_language_query(
 
 async def _handle_aggregation_query(
     parsed_query: Dict[str, Any],
-    elastic_service: ElasticsearchService,
+    postgres_service,
     results: List[Dict[str, Any]]
 ) -> Dict[str, Any]:
     """Handle aggregation queries like totals, averages, grouping."""

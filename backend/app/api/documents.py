@@ -1,17 +1,19 @@
-from fastapi import APIRouter, UploadFile, File, Depends, HTTPException, BackgroundTasks
-from sqlalchemy.orm import Session
-from typing import List, Optional
-from app.core.database import get_db
-from app.core.config import settings
-from app.models.schema import Schema
-from app.models.template import SchemaTemplate
-from app.models.document import Document, ExtractedField
-from app.services.reducto_service import ReductoService
-from app.services.elastic_service import ElasticsearchService
-from app.utils.bbox_utils import normalize_bbox
 import logging
 import os
 from datetime import datetime
+from typing import List, Optional
+
+from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, UploadFile
+from sqlalchemy.orm import Session
+
+from app.core.config import settings
+from app.core.database import get_db
+from app.models.document import Document, ExtractedField
+from app.models.schema import Schema
+from app.models.template import SchemaTemplate
+from app.services.postgres_service import PostgresService
+from app.services.reducto_service import ReductoService
+from app.utils.bbox_utils import normalize_bbox
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/documents", tags=["documents"])
@@ -111,7 +113,8 @@ async def process_single_document(document_id: int):
         schema = db.query(Schema).filter(Schema.id == document.schema_id).first()
 
         reducto_service = ReductoService()
-        elastic_service = ElasticsearchService()
+        from app.services.postgres_service import PostgresService
+        postgres_service = PostgresService(db)
 
         logger.info(f"Processing document {document_id}: {document.filename}")
 
@@ -370,7 +373,7 @@ async def process_single_document(document_id: int):
             parse_result = document.actual_parse_result
 
             if parse_result:
-                logger.info(f"Using cached parse result for ES indexing")
+                logger.info("Using cached parse result for ES indexing")
             else:
                 # Parse document to get full text for search
                 parsed_result = await reducto_service.parse_document(file_path)
@@ -389,7 +392,7 @@ async def process_single_document(document_id: int):
                 for chunk in parse_result.get("chunks", [])
             ])
 
-            es_id = await elastic_service.index_document(
+            es_id = await postgres_service.index_document(
                 document_id=document.id,
                 filename=document.filename,
                 extracted_fields=extracted_fields,
@@ -418,7 +421,7 @@ async def process_single_document(document_id: int):
         if "job not found" in error_message.lower() or "expired" in error_message.lower():
             error_message = "Reducto job expired. Please retry - the file will be re-uploaded and parsed."
         elif "file" in error_message.lower() and "not found" in error_message.lower():
-            error_message = f"File not found at path. Please retry the upload."
+            error_message = "File not found at path. Please retry the upload."
         elif "api" in error_message.lower() or "connection" in error_message.lower():
             error_message = "Reducto API connection failed. Please check your API key and try again."
         elif "schema" in error_message.lower():
@@ -701,8 +704,8 @@ async def delete_document(document_id: int, db: Session = Depends(get_db)):
         # Delete from Elasticsearch if indexed
         if document.elasticsearch_id:
             try:
-                elastic_service = ElasticsearchService()
-                await elastic_service.delete_document(document.elasticsearch_id)
+                postgres_service = PostgresService(db)
+                await postgres_service.delete_document(document.id)
                 logger.info(f"Deleted document {document_id} from Elasticsearch")
             except Exception as e:
                 logger.warning(f"Failed to delete document from Elasticsearch: {e}")
@@ -829,8 +832,8 @@ async def mark_document_verified(
 
         # Update Elasticsearch to keep status in sync
         try:
-            elastic_service = ElasticsearchService()
-            await elastic_service.update_document(
+            postgres_service = PostgresService(db)
+            await postgres_service.update_document(
                 doc_id=document.elasticsearch_id,
                 updates={"status": "verified"}
             )

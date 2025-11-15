@@ -1,8 +1,9 @@
-from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Table
-from sqlalchemy.orm import relationship
 from datetime import datetime
-from app.core.database import Base
 
+from sqlalchemy import Column, DateTime, ForeignKey, Integer, String, Table
+from sqlalchemy.orm import relationship
+
+from app.core.database import Base
 
 # Association table for many-to-many relationship between batches and extractions
 batch_extractions = Table(

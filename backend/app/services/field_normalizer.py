@@ -12,9 +12,8 @@ Key Features:
 - Query rewriting for cross-template searches
 """
 
-from typing import Dict, Any, List, Optional, Set
-from sqlalchemy.orm import Session
 import logging
+from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 

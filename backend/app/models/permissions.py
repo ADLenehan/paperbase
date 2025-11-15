@@ -23,11 +23,23 @@ Scope Levels:
 - document: Applies to a specific document
 """
 
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey, Text, UniqueConstraint, Enum as SQLEnum, Table
-from sqlalchemy.orm import relationship
-from datetime import datetime, timedelta
-from typing import Optional
 import enum
+from datetime import datetime
+
+from sqlalchemy import (
+    Boolean,
+    Column,
+    DateTime,
+    ForeignKey,
+    Integer,
+    String,
+    Table,
+    Text,
+    UniqueConstraint,
+)
+from sqlalchemy import Enum as SQLEnum
+from sqlalchemy.orm import relationship
+
 from app.core.database import Base
 
 

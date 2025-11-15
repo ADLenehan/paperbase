@@ -1,15 +1,16 @@
-from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.orm import Session
-from sqlalchemy import and_
+import logging
+import uuid
+from datetime import datetime
 from typing import Optional
+
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import and_
+from sqlalchemy.orm import Session
+
 from app.core.database import get_db
-from app.core.config import settings
 from app.models.document import Document, ExtractedField
 from app.models.verification import Verification, VerificationSession
-from app.services.elastic_service import ElasticsearchService
-from datetime import datetime
-import uuid
-import logging
+from app.services.postgres_service import PostgresService
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/verification", tags=["verification"])
@@ -102,8 +103,8 @@ async def verify_field(
     field.verified_at = datetime.utcnow()
 
     # Update Elasticsearch
-    elastic_service = ElasticsearchService()
-    await elastic_service.update_document(
+    postgres_service = PostgresService(db)
+    await postgres_service.update_document(
         document_id=field.document_id,
         updated_fields={
             field.field_name: verification_data.get("verified_value")

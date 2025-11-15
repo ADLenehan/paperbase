@@ -5,11 +5,12 @@ Tracks AI-generated answers and the source documents used to generate them.
 Allows users to view which documents contributed to a specific answer.
 """
 
-from sqlalchemy import Column, Integer, String, Text, DateTime, JSON
-from sqlalchemy.sql import func
-from datetime import datetime, timedelta
-from app.core.database import Base
 import uuid
+from datetime import datetime, timedelta
+
+from sqlalchemy import JSON, Column, DateTime, String, Text
+
+from app.core.database import Base
 
 
 class QueryHistory(Base):

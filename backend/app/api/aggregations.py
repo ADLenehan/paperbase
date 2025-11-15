@@ -5,13 +5,13 @@ Provides comprehensive aggregation capabilities for analytics and insights.
 Supports various aggregation types, multi-dimensional analysis, and nested aggregations.
 """
 
-from fastapi import APIRouter, HTTPException, Depends
-from pydantic import BaseModel, Field
-from typing import Dict, Any, List, Optional
-from app.services.elastic_service import ElasticsearchService
-from app.core.database import get_db
-from sqlalchemy.orm import Session
 import logging
+from typing import Any, Dict, List, Optional
+
+from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel, Field
+
+from app.services.postgres_service import PostgresService
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/aggregations", tags=["aggregations"])
@@ -60,10 +60,10 @@ async def get_single_aggregation(request: AggregationRequest):
     - Range aggregation: `{"field": "total_amount", "agg_type": "range", "agg_config": {"ranges": [{"to": 100}, {"from": 100, "to": 1000}, {"from": 1000}]}}`
     """
 
-    elastic_service = ElasticsearchService()
+    postgres_service = PostgresService(db)
 
     try:
-        result = await elastic_service.get_aggregations(
+        result = await postgres_service.get_aggregations(
             field=request.field,
             agg_type=request.agg_type,
             agg_config=request.agg_config,
@@ -103,10 +103,10 @@ async def get_multi_aggregations(request: MultiAggregationRequest):
     Returns comprehensive analytics in a single API call.
     """
 
-    elastic_service = ElasticsearchService()
+    postgres_service = PostgresService(db)
 
     try:
-        result = await elastic_service.get_multi_aggregations(
+        result = await postgres_service.get_multi_aggregations(
             aggregations=request.aggregations,
             filters=request.filters
         )
@@ -141,7 +141,7 @@ async def get_nested_aggregations(request: NestedAggregationRequest):
     Useful for grouped analytics like "stats by category" or "monthly trends by status".
     """
 
-    elastic_service = ElasticsearchService()
+    postgres_service = PostgresService(db)
 
     try:
         result = await elastic_service.get_nested_aggregations(
@@ -176,7 +176,7 @@ async def get_dashboard_aggregations():
     - Amount statistics
     """
 
-    elastic_service = ElasticsearchService()
+    postgres_service = PostgresService(db)
 
     try:
         # Define comprehensive dashboard aggregations
@@ -210,7 +210,7 @@ async def get_dashboard_aggregations():
             },
         ]
 
-        result = await elastic_service.get_multi_aggregations(
+        result = await postgres_service.get_multi_aggregations(
             aggregations=aggregations
         )
 
@@ -240,7 +240,7 @@ async def get_field_insights(field: str):
     - Date fields: Date histogram, date range
     """
 
-    elastic_service = ElasticsearchService()
+    postgres_service = PostgresService(db)
 
     try:
         # Get field mapping to determine type
@@ -250,7 +250,7 @@ async def get_field_insights(field: str):
 
         # Try terms aggregation (works for keyword fields)
         try:
-            terms_result = await elastic_service.get_aggregations(
+            terms_result = await postgres_service.get_aggregations(
                 field=field,
                 agg_type="terms",
                 agg_config={"size": 10}
@@ -261,7 +261,7 @@ async def get_field_insights(field: str):
 
         # Try stats aggregation (works for numeric fields)
         try:
-            stats_result = await elastic_service.get_aggregations(
+            stats_result = await postgres_service.get_aggregations(
                 field=field,
                 agg_type="stats"
             )
@@ -271,7 +271,7 @@ async def get_field_insights(field: str):
 
         # Try cardinality (works for all fields)
         try:
-            cardinality_result = await elastic_service.get_aggregations(
+            cardinality_result = await postgres_service.get_aggregations(
                 field=field,
                 agg_type="cardinality"
             )
@@ -328,7 +328,7 @@ async def execute_custom_aggregation(custom_query: Dict[str, Any]):
     ```
     """
 
-    elastic_service = ElasticsearchService()
+    postgres_service = PostgresService(db)
 
     try:
         aggregations = custom_query.get("aggregations")
@@ -337,7 +337,7 @@ async def execute_custom_aggregation(custom_query: Dict[str, Any]):
         if not aggregations:
             raise HTTPException(status_code=400, detail="aggregations field required")
 
-        result = await elastic_service.get_aggregations(
+        result = await postgres_service.get_aggregations(
             custom_aggs=aggregations,
             filters=filters
         )
@@ -366,7 +366,7 @@ async def get_preset_aggregation(preset_name: str, filters: Optional[Dict[str, A
     - template_analysis: Template usage and field distribution
     """
 
-    elastic_service = ElasticsearchService()
+    postgres_service = PostgresService(db)
 
     presets = {
         "confidence_analysis": [
@@ -419,7 +419,7 @@ async def get_preset_aggregation(preset_name: str, filters: Optional[Dict[str, A
         )
 
     try:
-        result = await elastic_service.get_multi_aggregations(
+        result = await postgres_service.get_multi_aggregations(
             aggregations=presets[preset_name],
             filters=filters
         )

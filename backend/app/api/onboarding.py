@@ -1,18 +1,20 @@
-from fastapi import APIRouter, UploadFile, File, Depends, HTTPException
-from sqlalchemy.orm import Session
-from sqlalchemy.orm.attributes import flag_modified
-from typing import List, Dict, Any
-from pydantic import BaseModel
-from app.core.database import get_db
-from app.models.schema import Schema
-from app.services.reducto_service import ReductoService
-from app.services.claude_service import ClaudeService
-from app.services.elastic_service import ElasticsearchService
-from app.utils.reducto_validation import validate_schema_for_reducto, format_validation_report
 import logging
 import os
 import tempfile
 from datetime import datetime
+from typing import Any, Dict, List
+
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from pydantic import BaseModel
+from sqlalchemy.orm import Session
+from sqlalchemy.orm.attributes import flag_modified
+
+from app.core.database import get_db
+from app.models.schema import Schema
+from app.services.claude_service import ClaudeService
+from app.services.postgres_service import PostgresService
+from app.services.reducto_service import ReductoService
+from app.utils.reducto_validation import format_validation_report, validate_schema_for_reducto
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/onboarding", tags=["onboarding"])
@@ -52,7 +54,7 @@ async def analyze_samples(
 
     reducto_service = ReductoService()
     claude_service = ClaudeService()
-    elastic_service = ElasticsearchService()
+    postgres_service = PostgresService(db)
 
     parsed_documents = []
     temp_files = []
@@ -219,7 +221,7 @@ async def create_schema(
 
     # Create Elasticsearch index
     try:
-        elastic_service = ElasticsearchService()
+        postgres_service = PostgresService(db)
         await elastic_service.create_index({
             "name": new_schema.name,
             "fields": new_schema.fields
@@ -294,7 +296,7 @@ async def update_schema(
 
     # Update Elasticsearch mapping (optional - may not be running in dev)
     try:
-        elastic_service = ElasticsearchService()
+        postgres_service = PostgresService(db)
         await elastic_service.create_index({
             "name": schema.name,
             "fields": schema.fields
@@ -318,8 +320,8 @@ async def re_extract_documents(
     Re-extract all documents using this schema after template changes
     Updates all documents with new field definitions
     """
-    from app.models.document import Document
     from app.api.documents import process_single_document
+    from app.models.document import Document
 
     schema = db.query(Schema).filter(Schema.id == schema_id).first()
     if not schema:
@@ -573,7 +575,6 @@ async def add_field_and_extract(
             "extraction_job_id": 123  // if extract_from_existing=true
         }
     """
-    from app.models.document import Document
     from app.services.field_extraction_service import FieldExtractionService
 
     field_config = request.get("field")
@@ -612,7 +613,7 @@ async def add_field_and_extract(
 
     # Update Elasticsearch mapping
     try:
-        elastic_service = ElasticsearchService()
+        postgres_service = PostgresService(db)
         # For now, we'll recreate the index with the new field
         # In future, could use _mapping API to add field dynamically
         await elastic_service.create_index({

@@ -1,21 +1,15 @@
 """
 Error handling middleware and exception handlers for FastAPI.
 """
-from fastapi import Request, status
-from fastapi.responses import JSONResponse
-from fastapi.exceptions import RequestValidationError
-from starlette.exceptions import HTTPException as StarletteHTTPException
 import logging
-from typing import Union
+
+from fastapi import Request, status
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
+from starlette.exceptions import HTTPException as StarletteHTTPException
+
 from .exceptions import (
     PaperbaseException,
-    ValidationError,
-    NotFoundError,
-    ExternalServiceError,
-    ProcessingError,
-    SchemaError,
-    FileUploadError,
-    ConfigurationError
 )
 
 logger = logging.getLogger(__name__)

@@ -1,8 +1,9 @@
-from sqlalchemy.orm import Session
-from typing import Dict, Any, List, Optional
-from app.models.schema import Schema
-from app.models.template import SchemaTemplate
 import logging
+from typing import Any, Dict, List, Optional
+
+from sqlalchemy.orm import Session
+
+from app.models.schema import Schema
 
 logger = logging.getLogger(__name__)
 

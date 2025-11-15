@@ -1,21 +1,23 @@
 """
 Template matching utilities for hybrid Elasticsearch + Claude matching
 """
-from typing import Dict, Any, List, Optional
-from sqlalchemy.orm import Session
-from app.models.document import Document
-from app.services.elastic_service import ElasticsearchService
-from app.services.claude_service import ClaudeService
-from app.services.settings_service import SettingsService
 import logging
 import re
+from typing import Any, Dict, List, Optional
+
+from sqlalchemy.orm import Session
+
+from app.models.document import Document
+from app.services.claude_service import ClaudeService
+from app.services.postgres_service import PostgresService
+from app.services.settings_service import SettingsService
 
 logger = logging.getLogger(__name__)
 
 
 async def hybrid_match_document(
     document: Document,
-    elastic_service: ElasticsearchService,
+    postgres_service: PostgresService,
     claude_service: ClaudeService,
     available_templates: List[Dict[str, Any]],
     db: Optional[Session] = None
@@ -25,7 +27,7 @@ async def hybrid_match_document(
 
     Args:
         document: Document to match
-        elastic_service: Elasticsearch service instance
+        postgres_service: Elasticsearch service instance
         claude_service: Claude service instance
         available_templates: List of available templates with fields
 
@@ -74,7 +76,7 @@ async def hybrid_match_document(
     logger.info(f"Matching document {document.filename} with {len(doc_fields)} fields")
 
     # STEP 1: Try Elasticsearch MLT
-    es_matches = await elastic_service.find_similar_templates(
+    es_matches = await postgres_service.find_similar_templates(
         document_text=doc_text,
         document_fields=doc_fields,
         min_score=0.4  # Low bar for ES to return something
@@ -145,7 +147,7 @@ async def hybrid_match_document(
 async def auto_match_documents(
     db: Session,
     documents: List[Document],
-    elastic_service: ElasticsearchService,
+    postgres_service: PostgresService,
     claude_service: ClaudeService,
     available_templates: List[Dict[str, Any]],
     threshold: float = 0.70
@@ -156,7 +158,7 @@ async def auto_match_documents(
     Args:
         db: Database session
         documents: List of documents to match
-        elastic_service: Elasticsearch service
+        postgres_service: Elasticsearch service
         claude_service: Claude service
         available_templates: Available templates
         threshold: Minimum confidence to suggest match
@@ -173,7 +175,7 @@ async def auto_match_documents(
         # Use hybrid matching
         match_result = await hybrid_match_document(
             document=doc,
-            elastic_service=elastic_service,
+            postgres_service=postgres_service,
             claude_service=claude_service,
             available_templates=available_templates,
             db=db

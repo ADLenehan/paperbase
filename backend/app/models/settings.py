@@ -13,11 +13,22 @@ Resolution order when retrieving settings:
 4. Fall back to hardcoded defaults in code
 """
 
-from sqlalchemy import Column, Integer, String, Float, Boolean, DateTime, ForeignKey, UniqueConstraint, Text
-from sqlalchemy.orm import relationship
 from datetime import datetime
-from app.core.database import Base
 from typing import Optional
+
+from sqlalchemy import (
+    Boolean,
+    Column,
+    DateTime,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+)
+from sqlalchemy.orm import relationship
+
+from app.core.database import Base
 
 
 class Organization(Base):

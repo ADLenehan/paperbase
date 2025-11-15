@@ -14,8 +14,8 @@ Supports all ES query types used in Paperbase:
 - Nested and compound queries
 """
 
-from typing import Dict, List, Set, Any, Optional
 import logging
+from typing import Any, Dict, List, Optional, Set
 
 logger = logging.getLogger(__name__)
 

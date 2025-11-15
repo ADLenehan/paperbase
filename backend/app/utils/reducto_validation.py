@@ -12,9 +12,9 @@ Key Reducto Requirements:
 5. System prompts should include document context
 """
 
-import re
 import logging
-from typing import Dict, Any, List, Tuple
+import re
+from typing import Any, Dict, List, Tuple
 
 logger = logging.getLogger(__name__)
 

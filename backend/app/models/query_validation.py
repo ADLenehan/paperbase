@@ -6,8 +6,10 @@ This enables a learning loop where successful queries strengthen patterns
 and unsuccessful queries trigger refinements.
 """
 
-from sqlalchemy import Column, Integer, String, JSON, DateTime, Float, Boolean, Text
 from datetime import datetime
+
+from sqlalchemy import JSON, Boolean, Column, DateTime, Float, Integer, String, Text
+
 from app.core.database import Base
 
 

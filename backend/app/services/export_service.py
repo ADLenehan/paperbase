@@ -1,17 +1,18 @@
 """
 Export Service - Handle CSV, Excel, and JSON exports of extracted document data
 """
-from typing import List, Dict, Any, Optional
-from datetime import datetime, date
-import pandas as pd
 import io
 import json
-from sqlalchemy.orm import Session
+import logging
+from datetime import date, datetime
+from typing import Any, Dict, List, Optional
+
+import pandas as pd
 from sqlalchemy import and_, or_
+from sqlalchemy.orm import Session
+
 from app.models.document import Document, ExtractedField
 from app.models.template import SchemaTemplate
-from app.models.schema import Schema
-import logging
 
 logger = logging.getLogger(__name__)
 
@@ -503,7 +504,7 @@ class ExportService:
         date_to: Optional[date] = None
     ) -> Dict[str, Any]:
         """Get summary statistics for export using efficient database aggregations"""
-        from sqlalchemy import func, case
+        from sqlalchemy import case, func
 
         doc_query = db.query(Document.id)
 
