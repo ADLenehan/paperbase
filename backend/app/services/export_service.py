@@ -502,13 +502,13 @@ class ExportService:
         date_from: Optional[date] = None,
         date_to: Optional[date] = None
     ) -> Dict[str, Any]:
-        """Get summary statistics for export"""
+        """Get summary statistics for export using efficient database aggregations"""
+        from sqlalchemy import func, case
 
-        # Build query
-        query = db.query(Document)
+        doc_query = db.query(Document.id)
 
         if template_id:
-            query = query.filter(
+            doc_query = doc_query.filter(
                 or_(
                     Document.suggested_template_id == template_id,
                     Document.schema_id == template_id
@@ -516,28 +516,29 @@ class ExportService:
             )
 
         if date_from:
-            query = query.filter(Document.uploaded_at >= datetime.combine(date_from, datetime.min.time()))
+            doc_query = doc_query.filter(Document.uploaded_at >= datetime.combine(date_from, datetime.min.time()))
 
         if date_to:
-            query = query.filter(Document.uploaded_at <= datetime.combine(date_to, datetime.max.time()))
+            doc_query = doc_query.filter(Document.uploaded_at <= datetime.combine(date_to, datetime.max.time()))
 
-        documents = query.all()
+        total_docs = doc_query.count()
 
-        # Calculate statistics
-        total_docs = len(documents)
-        total_fields = sum(len(doc.extracted_fields) for doc in documents)
-        verified_fields = sum(
-            sum(1 for field in doc.extracted_fields if field.verified)
-            for doc in documents
-        )
+        # Calculate field statistics using a single aggregation query
+        field_stats = db.query(
+            func.count(ExtractedField.id).label('total_fields'),
+            func.sum(case((ExtractedField.verified == True, 1), else_=0)).label('verified_fields'),
+            func.avg(ExtractedField.confidence_score).label('avg_confidence')
+        ).join(
+            Document,
+            ExtractedField.document_id == Document.id
+        ).filter(
+            Document.id.in_(doc_query.subquery())
+        ).first()
 
-        avg_confidence = 0
-        if total_fields > 0:
-            total_confidence = sum(
-                sum(field.confidence_score or 0 for field in doc.extracted_fields)
-                for doc in documents
-            )
-            avg_confidence = total_confidence / total_fields
+        # Extract results with safe defaults
+        total_fields = field_stats.total_fields or 0
+        verified_fields = field_stats.verified_fields or 0
+        avg_confidence = float(field_stats.avg_confidence) if field_stats.avg_confidence else 0.0
 
         return {
             "total_documents": total_docs,
