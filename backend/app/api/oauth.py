@@ -103,6 +103,13 @@ async def oauth_authorize(
             detail=f"Unsupported provider: {provider}"
         )
 
+    # Check if provider is configured
+    if not oauth_service.is_provider_configured(provider):
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"{provider.capitalize()} OAuth is not configured. Please contact administrator."
+        )
+
     try:
         auth_data = await oauth_service.get_authorization_url(provider)
         return auth_data
@@ -167,6 +174,13 @@ async def oauth_callback(
             detail=f"Unsupported provider: {provider}"
         )
 
+    # Check if provider is configured
+    if not oauth_service.is_provider_configured(provider):
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"{provider.capitalize()} OAuth is not configured. Please contact administrator."
+        )
+
     try:
         # Exchange code for tokens
         tokens = await oauth_service.exchange_code_for_token(
@@ -188,7 +202,7 @@ async def oauth_callback(
         )
 
         # Generate JWT token for our application
-        jwt_token = create_access_token(data={"sub": user.email})
+        jwt_token = create_access_token(user_id=user.id)
 
         # Check if user needs onboarding (no organization)
         needs_onboarding = not user.onboarding_completed or user.org_id is None

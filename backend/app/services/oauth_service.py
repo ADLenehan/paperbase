@@ -56,23 +56,37 @@ class OAuthConfig:
 config = Config(environ=os.environ)
 oauth = OAuth(config)
 
-# Register Google
-oauth.register(
-    name='google',
-    client_id=OAuthConfig.GOOGLE_CLIENT_ID,
-    client_secret=OAuthConfig.GOOGLE_CLIENT_SECRET,
-    server_metadata_url='https://accounts.google.com/.well-known/openid-configuration',
-    client_kwargs={'scope': ' '.join(OAuthConfig.GOOGLE_SCOPES)},
-)
+# Register Google (only if credentials are configured)
+if OAuthConfig.GOOGLE_CLIENT_ID and OAuthConfig.GOOGLE_CLIENT_SECRET:
+    try:
+        oauth.register(
+            name='google',
+            client_id=OAuthConfig.GOOGLE_CLIENT_ID,
+            client_secret=OAuthConfig.GOOGLE_CLIENT_SECRET,
+            server_metadata_url='https://accounts.google.com/.well-known/openid-configuration',
+            client_kwargs={'scope': ' '.join(OAuthConfig.GOOGLE_SCOPES)},
+        )
+        logger.info("Google OAuth configured successfully")
+    except Exception as e:
+        logger.warning(f"Failed to configure Google OAuth: {e}")
+else:
+    logger.info("Google OAuth not configured (missing credentials)")
 
-# Register Microsoft
-oauth.register(
-    name='microsoft',
-    client_id=OAuthConfig.MICROSOFT_CLIENT_ID,
-    client_secret=OAuthConfig.MICROSOFT_CLIENT_SECRET,
-    server_metadata_url=f'https://login.microsoftonline.com/{OAuthConfig.MICROSOFT_TENANT_ID}/v2.0/.well-known/openid-configuration',
-    client_kwargs={'scope': ' '.join(OAuthConfig.MICROSOFT_SCOPES)},
-)
+# Register Microsoft (only if credentials are configured)
+if OAuthConfig.MICROSOFT_CLIENT_ID and OAuthConfig.MICROSOFT_CLIENT_SECRET:
+    try:
+        oauth.register(
+            name='microsoft',
+            client_id=OAuthConfig.MICROSOFT_CLIENT_ID,
+            client_secret=OAuthConfig.MICROSOFT_CLIENT_SECRET,
+            server_metadata_url=f'https://login.microsoftonline.com/{OAuthConfig.MICROSOFT_TENANT_ID}/v2.0/.well-known/openid-configuration',
+            client_kwargs={'scope': ' '.join(OAuthConfig.MICROSOFT_SCOPES)},
+        )
+        logger.info("Microsoft OAuth configured successfully")
+    except Exception as e:
+        logger.warning(f"Failed to configure Microsoft OAuth: {e}")
+else:
+    logger.info("Microsoft OAuth not configured (missing credentials)")
 
 
 class OAuthService:
@@ -89,6 +103,22 @@ class OAuthService:
 
     def __init__(self):
         self.oauth = oauth
+
+    def is_provider_configured(self, provider: str) -> bool:
+        """
+        Check if an OAuth provider is configured.
+
+        Args:
+            provider: 'google' or 'microsoft'
+
+        Returns:
+            True if provider is configured, False otherwise
+        """
+        try:
+            self.oauth.create_client(provider)
+            return True
+        except Exception:
+            return False
 
     @staticmethod
     def generate_state() -> str:
