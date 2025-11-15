@@ -11,7 +11,7 @@ from app.core.database import get_db
 from app.models.document import Document, ExtractedField
 from app.models.verification import Verification
 from app.services.claude_service import ClaudeService
-from app.services.elastic_service import ElasticsearchService
+from app.services.postgres_service import PostgresService
 from app.services.settings_service import SettingsService
 from app.utils.bbox_utils import normalize_bbox
 
@@ -315,8 +315,8 @@ async def verify_field(
     # Update Elasticsearch if value changed
     if verified_value != field.field_value:
         try:
-            elastic_service = ElasticsearchService()
-            await elastic_service.update_document(
+            postgres_service = PostgresService(db)
+            await postgres_service.update_document(
                 document_id=field.document_id,
                 updated_fields={field.field_name: verified_value}
             )
@@ -423,17 +423,16 @@ async def verify_field_and_regenerate_answer(
     field.verified_value = verified_value
     field.verified_at = datetime.utcnow()
 
-    # Update Elasticsearch if value changed
-    elastic_service = ElasticsearchService()
+    # Update PostgreSQL if value changed
     if verified_value != field.field_value:
         try:
-            await elastic_service.update_document(
+            await postgres_service.update_document(
                 document_id=field.document_id,
                 updated_fields={field.field_name: verified_value}
             )
-            logger.info(f"Updated ES for document {field.document_id}, field {field.field_name}")
+            logger.info(f"Updated PostgreSQL for document {field.document_id}, field {field.field_name}")
         except Exception as e:
-            logger.warning(f"Failed to update Elasticsearch: {e}")
+            logger.warning(f"Failed to update PostgreSQL: {e}")
 
     db.commit()
 
@@ -441,7 +440,7 @@ async def verify_field_and_regenerate_answer(
     updated_documents = []
     try:
         for doc_id in request.document_ids:
-            es_doc = await elastic_service.get_document_by_id(doc_id)
+            es_doc = await postgres_service.get_document(doc_id)
             if es_doc:
                 updated_documents.append(es_doc)
     except Exception as e:
@@ -621,8 +620,9 @@ async def bulk_verify_fields(
     Returns:
         Summary of verifications including success count and any errors
     """
-
-    elastic_service = ElasticsearchService()
+    from app.services.postgres_service import PostgresService
+    
+    postgres_service = PostgresService(db)
     results = {
         "total": len(request.verifications),
         "successful": 0,
@@ -630,8 +630,8 @@ async def bulk_verify_fields(
         "errors": []
     }
 
-    # Group updates by document for batch ES operations
-    es_updates_by_doc = {}
+    # Group updates by document for batch PostgreSQL operations
+    pg_updates_by_doc = {}
 
     for verification_req in request.verifications:
         try:
@@ -712,24 +712,24 @@ async def bulk_verify_fields(
     # Commit all database changes
     db.commit()
 
-    # Batch update Elasticsearch
-    es_update_count = 0
-    for document_id, updated_fields in es_updates_by_doc.items():
+    # Batch update PostgreSQL
+    pg_update_count = 0
+    for document_id, updated_fields in pg_updates_by_doc.items():
         try:
-            await elastic_service.update_document(
+            await postgres_service.update_document(
                 document_id=document_id,
                 updated_fields=updated_fields
             )
-            es_update_count += 1
+            pg_update_count += 1
         except Exception as e:
-            logger.warning(f"Failed to update ES for document {document_id}: {e}")
+            logger.warning(f"Failed to update PostgreSQL for document {document_id}: {e}")
 
-    logger.info(f"Bulk verified {results['successful']}/{results['total']} fields, updated {es_update_count} ES documents")
+    logger.info(f"Bulk verified {results['successful']}/{results['total']} fields, updated {pg_update_count} PostgreSQL documents")
 
     return {
         "success": results["failed"] == 0,
         "results": results,
-        "elasticsearch_updates": es_update_count,
+        "postgresql_updates": pg_update_count,
         "message": f"Verified {results['successful']} of {results['total']} fields"
     }
 
@@ -759,8 +759,9 @@ async def bulk_verify_and_regenerate(
     4. Regenerate answer using Claude with updated data
     5. Return updated answer and verification results
     """
-
-    elastic_service = ElasticsearchService()
+    from app.services.postgres_service import PostgresService
+    
+    postgres_service = PostgresService(db)
     results = {
         "total": len(request.verifications),
         "successful": 0,
@@ -768,8 +769,8 @@ async def bulk_verify_and_regenerate(
         "errors": []
     }
 
-    # Track ES updates by document for batch operations
-    es_updates_by_doc = {}
+    # Track PostgreSQL updates by document for batch operations
+    pg_updates_by_doc = {}
     verified_field_ids = []
 
     # Step 1: Process all verifications
@@ -833,11 +834,11 @@ async def bulk_verify_and_regenerate(
             field.verified_value = verified_value
             field.verified_at = datetime.utcnow()
 
-            # Track ES updates for batch operation
+            # Track PostgreSQL updates for batch operation
             if verified_value != field.field_value:
-                if field.document_id not in es_updates_by_doc:
-                    es_updates_by_doc[field.document_id] = {}
-                es_updates_by_doc[field.document_id][field.field_name] = verified_value
+                if field.document_id not in pg_updates_by_doc:
+                    pg_updates_by_doc[field.document_id] = {}
+                pg_updates_by_doc[field.document_id][field.field_name] = verified_value
 
             verified_field_ids.append(field.id)
             results["successful"] += 1
@@ -853,29 +854,29 @@ async def bulk_verify_and_regenerate(
     # Commit all database changes
     db.commit()
 
-    # Step 2: Batch update Elasticsearch
-    es_update_count = 0
-    for document_id, updated_fields in es_updates_by_doc.items():
+    # Step 2: Batch update PostgreSQL
+    pg_update_count = 0
+    for document_id, updated_fields in pg_updates_by_doc.items():
         try:
-            await elastic_service.update_document(
+            await postgres_service.update_document(
                 document_id=document_id,
                 updated_fields=updated_fields
             )
-            es_update_count += 1
+            pg_update_count += 1
         except Exception as e:
-            logger.warning(f"Failed to update ES for document {document_id}: {e}")
+            logger.warning(f"Failed to update PostgreSQL for document {document_id}: {e}")
 
-    logger.info(f"Bulk verified {results['successful']}/{results['total']} fields, updated {es_update_count} ES documents")
+    logger.info(f"Bulk verified {results['successful']}/{results['total']} fields, updated {pg_update_count} PostgreSQL documents")
 
-    # Step 3: Re-fetch updated documents from Elasticsearch
+    # Step 3: Re-fetch updated documents from PostgreSQL
     updated_documents = []
     try:
         for doc_id in request.document_ids:
-            es_doc = await elastic_service.get_document_by_id(doc_id)
-            if es_doc:
-                updated_documents.append(es_doc)
+            pg_doc = await postgres_service.get_document(doc_id)
+            if pg_doc:
+                updated_documents.append(pg_doc)
     except Exception as e:
-        logger.error(f"Failed to fetch updated documents from ES: {e}")
+        logger.error(f"Failed to fetch updated documents from PostgreSQL: {e}")
         # Continue without regenerating answer
         updated_documents = []
 
@@ -908,7 +909,7 @@ async def bulk_verify_and_regenerate(
     return {
         "success": results["failed"] == 0,
         "results": results,
-        "elasticsearch_updates": es_update_count,
+        "postgresql_updates": pg_update_count,
         "verified_count": results["successful"],
         "updated_answer": updated_answer,
         "answer_metadata": answer_metadata,

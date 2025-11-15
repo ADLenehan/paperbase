@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.models.schema import Schema
-from app.services.elastic_service import ElasticsearchService
+from app.services.postgres_service import PostgresService
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/search/suggestions", tags=["search"])
@@ -35,7 +35,7 @@ async def get_query_suggestions(
             "field_hints": ["field1", "field2", ...]  # Common fields for this template
         }
     """
-    elastic_service = ElasticsearchService()
+    postgres_service = PostgresService(db)
 
     try:
         # If template_id provided, generate template-specific suggestions

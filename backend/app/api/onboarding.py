@@ -12,7 +12,7 @@ from sqlalchemy.orm.attributes import flag_modified
 from app.core.database import get_db
 from app.models.schema import Schema
 from app.services.claude_service import ClaudeService
-from app.services.elastic_service import ElasticsearchService
+from app.services.postgres_service import PostgresService
 from app.services.reducto_service import ReductoService
 from app.utils.reducto_validation import format_validation_report, validate_schema_for_reducto
 
@@ -54,7 +54,7 @@ async def analyze_samples(
 
     reducto_service = ReductoService()
     claude_service = ClaudeService()
-    elastic_service = ElasticsearchService()
+    postgres_service = PostgresService(db)
 
     parsed_documents = []
     temp_files = []
@@ -221,7 +221,7 @@ async def create_schema(
 
     # Create Elasticsearch index
     try:
-        elastic_service = ElasticsearchService()
+        postgres_service = PostgresService(db)
         await elastic_service.create_index({
             "name": new_schema.name,
             "fields": new_schema.fields
@@ -296,7 +296,7 @@ async def update_schema(
 
     # Update Elasticsearch mapping (optional - may not be running in dev)
     try:
-        elastic_service = ElasticsearchService()
+        postgres_service = PostgresService(db)
         await elastic_service.create_index({
             "name": schema.name,
             "fields": schema.fields
@@ -613,7 +613,7 @@ async def add_field_and_extract(
 
     # Update Elasticsearch mapping
     try:
-        elastic_service = ElasticsearchService()
+        postgres_service = PostgresService(db)
         # For now, we'll recreate the index with the new field
         # In future, could use _mapping API to add field dynamically
         await elastic_service.create_index({

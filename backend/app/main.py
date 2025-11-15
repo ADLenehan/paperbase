@@ -100,15 +100,16 @@ async def startup_event():
     Base.metadata.create_all(bind=engine)
     logger.info("Database tables created successfully")
 
-    # Create Elasticsearch template signatures index
-    from app.services.elastic_service import ElasticsearchService
+    from app.services.postgres_service import PostgresService
+    from app.core.database import SessionLocal
 
     try:
-        elastic_service = ElasticsearchService()
-        await elastic_service.create_template_signatures_index()
-        logger.info("Template signatures index created/verified")
+        db = SessionLocal()
+        postgres_service = PostgresService(db)
+        logger.info("PostgreSQL template signatures table ready")
+        db.close()
     except Exception as e:
-        logger.error(f"Error creating template signatures index: {e}")
+        logger.error(f"Error verifying PostgreSQL setup: {e}")
 
     # Initialize settings with defaults
     from app.core.database import SessionLocal
@@ -143,12 +144,12 @@ async def startup_event():
         templates = seed_builtin_templates(db)
         logger.info(f"Seeded {len(templates)} built-in templates")
 
-        # Index template signatures for built-in templates
-        elastic_service = ElasticsearchService()
+        # Index template signatures for built-in templates in PostgreSQL
+        postgres_service = PostgresService(db)
         for template in templates:
             try:
                 field_names = [f["name"] for f in template.fields]
-                await elastic_service.index_template_signature(
+                await postgres_service.index_template_signature(
                     template_id=template.id,
                     template_name=template.name,
                     field_names=field_names,
@@ -160,7 +161,6 @@ async def startup_event():
                 logger.error(f"Error indexing template {template.name}: {e}")
 
         db.close()
-        await elastic_service.close()
     except Exception as e:
         logger.error(f"Error seeding templates: {e}")
 

@@ -234,20 +234,22 @@ async def call_tool(name: str, arguments: Dict[str, Any]) -> List[TextContent]:
 
 async def _search_documents(args: Dict[str, Any]) -> List[TextContent]:
     """
-    Search documents using existing Elasticsearch service.
-    Reuses: app/services/elastic_service.py
+    Search documents using PostgreSQL service.
+    Reuses: app/services/postgres_service.py
     """
-    from app.services.elastic_service import ElasticsearchService
+    from app.core.database import SessionLocal
+    from app.services.postgres_service import PostgresService
 
     query = args.get("query", "")
     filters = args.get("filters", {})
     limit = args.get("limit", 20)
 
-    elastic_service = ElasticsearchService()
+    db = SessionLocal()
+    postgres_service = PostgresService(db)
 
     try:
         # Call existing search method
-        results = await elastic_service.search(
+        results = await postgres_service.search(
             query=query,
             filters=filters,
             page=1,
@@ -290,22 +292,24 @@ async def _search_documents(args: Dict[str, Any]) -> List[TextContent]:
         return [TextContent(type="text", text=response)]
 
     finally:
-        await elastic_service.close()
+        db.close()
 
 
 async def _get_document(args: Dict[str, Any]) -> List[TextContent]:
     """
     Get a specific document.
-    Reuses: app/services/elastic_service.py
+    Reuses: app/services/postgres_service.py
     """
-    from app.services.elastic_service import ElasticsearchService
+    from app.core.database import SessionLocal
+    from app.services.postgres_service import PostgresService
 
     doc_id = args.get("document_id")
 
-    elastic_service = ElasticsearchService()
+    db = SessionLocal()
+    postgres_service = PostgresService(db)
 
     try:
-        doc = await elastic_service.get_document(doc_id)
+        doc = await postgres_service.get_document(doc_id)
 
         if not doc:
             return [TextContent(
@@ -336,7 +340,7 @@ async def _get_document(args: Dict[str, Any]) -> List[TextContent]:
         return [TextContent(type="text", text=response)]
 
     finally:
-        await elastic_service.close()
+        db.close()
 
 
 async def _get_audit_queue(args: Dict[str, Any]) -> List[TextContent]:
@@ -504,18 +508,18 @@ async def _get_templates(args: Dict[str, Any]) -> List[TextContent]:
 async def _get_statistics(args: Dict[str, Any]) -> List[TextContent]:
     """
     Get system statistics.
-    Reuses: elastic_service.get_index_stats() and DB queries
+    Reuses: postgres_service.get_index_stats() and DB queries
     """
     from app.core.database import SessionLocal
     from app.models.document import Document
-    from app.services.elastic_service import ElasticsearchService
+    from app.services.postgres_service import PostgresService
 
-    elastic_service = ElasticsearchService()
+    postgres_service = PostgresService(db)
     db = SessionLocal()
 
     try:
         # Get ES stats
-        es_stats = await elastic_service.get_index_stats()
+        es_stats = await postgres_service.get_index_stats()
 
         # Get document counts by status
         total_docs = db.query(Document).count()
@@ -545,7 +549,7 @@ async def _get_statistics(args: Dict[str, Any]) -> List[TextContent]:
         return [TextContent(type="text", text=response)]
 
     finally:
-        await elastic_service.close()
+        postgres_service.close() if hasattr(postgres_service, 'close') else None
         db.close()
 
 
