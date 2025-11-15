@@ -8,12 +8,19 @@ class PhysicalFile(Base):
     """
     Represents the actual uploaded file on disk.
     One physical file can have multiple extractions with different templates.
+
+    Multi-tenancy: Files are isolated per organization for data security.
+    Same file uploaded to different orgs creates separate PhysicalFile records.
     """
     __tablename__ = "physical_files"
 
     id = Column(Integer, primary_key=True, index=True)
+
+    # Multi-tenancy: Files belong to organizations
+    organization_id = Column(Integer, ForeignKey("organizations.id"), nullable=True, index=True)
+
     filename = Column(String, nullable=False)  # Original: "contract.pdf"
-    file_hash = Column(String, unique=True, index=True)  # SHA256 for deduplication
+    file_hash = Column(String, index=True)  # SHA256 for deduplication (not unique - per org)
     file_path = Column(String, unique=True, nullable=False)  # "uploads/abc123_contract.pdf"
     file_size = Column(Integer)
     mime_type = Column(String)

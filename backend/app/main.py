@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import settings
 from app.core.database import engine, Base
 from app.core.error_handlers import register_error_handlers
-from app.api import onboarding, documents, search, verification, analytics, templates, bulk_upload, rematch, extractions, folders, nl_query, audit, files, settings as settings_api, export, aggregations, mcp_search, auth, users, roles, sharing, query_suggestions
+from app.api import onboarding, documents, search, verification, analytics, templates, bulk_upload, rematch, extractions, folders, nl_query, audit, files, settings as settings_api, export, aggregations, mcp_search, auth, users, roles, sharing, query_suggestions, oauth, organizations
 import logging
 
 # Configure logging
@@ -37,11 +37,13 @@ app.add_middleware(
 register_error_handlers(app)
 
 # Include routers
-# Authentication & User Management (NEW)
+# Authentication & User Management
 app.include_router(auth.router)  # Login, logout, API keys
+app.include_router(oauth.router)  # OAuth (Google, Microsoft)
 app.include_router(users.router)  # User management
 app.include_router(roles.router)  # Role & permission management
 app.include_router(sharing.router)  # Document sharing
+app.include_router(organizations.router)  # Organization management
 
 # Core functionality
 app.include_router(settings_api.router)  # Settings management

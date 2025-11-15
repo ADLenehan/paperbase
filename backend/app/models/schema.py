@@ -8,7 +8,11 @@ class Schema(Base):
     __tablename__ = "schemas"
 
     id = Column(Integer, primary_key=True, index=True)
-    name = Column(String, unique=True, index=True, nullable=False)
+
+    # Multi-tenancy: Schemas/Templates belong to organizations
+    organization_id = Column(Integer, ForeignKey("organizations.id"), nullable=True, index=True)
+
+    name = Column(String, nullable=False)  # Removed unique=True to allow per-org uniqueness
     fields = Column(JSON, nullable=False)  # List of field definitions
 
     # Template-level search guidance (NEW - for semantic field mapping)
