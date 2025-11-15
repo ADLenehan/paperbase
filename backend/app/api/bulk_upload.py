@@ -280,7 +280,7 @@ async def upload_and_analyze(
     logger.info(f"Created {len(uploaded_docs)} Document records from {len(hash_groups)} unique files")
 
     # Step 3: Cluster similar documents with Elasticsearch (FAST & FREE)
-    elastic_service = ElasticsearchService()
+    postgres_service = PostgresService(db)
 
     # Use ES clustering instead of Claude grouping (eliminates 1 guaranteed Claude call!)
     clusters = await elastic_service.cluster_uploaded_documents(
@@ -920,7 +920,7 @@ async def create_new_template(
         )
 
         # NEW: Index template signature for future matching
-        elastic_service = ElasticsearchService()
+        postgres_service = PostgresService(db)
         field_names = [f["name"] for f in schema_data["fields"]]
 
         # Get sample text from first document
@@ -1100,7 +1100,7 @@ async def bulk_verify(
     db.commit()
     db.refresh(session)
 
-    elastic_service = ElasticsearchService()
+    postgres_service = PostgresService(db)
     updated_count = 0
 
     for v in verifications:
