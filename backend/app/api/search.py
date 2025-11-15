@@ -110,7 +110,8 @@ async def search_documents(
                 get_confidence_summary
             )
 
-            document_ids = [doc.get("id") for doc in search_results.get("documents", []) if doc.get("id")]
+            # Use ONLY documents that were actually cited in the answer (not all search results)
+            document_ids = answer_result.get("sources_used", [])
 
             low_conf_fields_grouped = await get_low_confidence_fields_for_documents(
                 document_ids=document_ids,
@@ -410,7 +411,8 @@ async def search_documents(
             confidence_summary = {"low_confidence_count": 0, "total_fields": 0}
             logger.info("Skipping audit metadata for aggregation query (no documents returned)")
         else:
-            document_ids = [doc.get("id") for doc in search_results.get("documents", []) if doc.get("id")]
+            # Use ONLY documents that were actually cited in the answer (not all search results)
+            document_ids = answer_result.get("sources_used", [])
 
             # OPTIMIZATION: Filter fields in SQL query, not Python
             low_conf_fields_grouped = await get_low_confidence_fields_for_documents(
@@ -457,11 +459,12 @@ async def search_documents(
         from app.models.query_history import QueryHistory
         from app.core.config import settings
 
-        # Extract document IDs from search results (skip for aggregation queries)
+        # Use ONLY documents that were actually cited in the answer (not all search results)
+        # For aggregation queries, there are no source documents
         if query_type == "aggregation" and aggregation_spec:
             document_ids_for_history = []
         else:
-            document_ids_for_history = [doc.get("id") for doc in search_results.get("documents", []) if doc.get("id")]
+            document_ids_for_history = answer_result.get("sources_used", [])
 
         query_history = QueryHistory.create_from_search(
             query=request.query,

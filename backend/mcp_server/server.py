@@ -9,7 +9,7 @@ from typing import Optional, List, Dict, Any
 import logging
 
 from mcp_server.config import config
-from mcp_server.tools import documents, templates, analytics, audit, ai_search
+from mcp_server.tools import documents, templates, analytics, audit, ai_search, aggregations
 from mcp_server.resources import templates as template_resources
 from mcp_server.resources import stats as stats_resources
 from mcp_server.resources import documents as document_resources
@@ -33,6 +33,71 @@ logger.info(f"Initializing {config.SERVER_NAME} v{config.VERSION}")
 
 
 # ==================== TOOLS ====================
+# IMPORTANT: ask_ai is the PRIMARY tool - use it FIRST for natural language questions!
+
+@mcp.tool()
+async def ask_ai(
+    query: str,
+    folder_path: Optional[str] = None,
+    template_id: Optional[str] = None
+) -> Dict[str, Any]:
+    """
+    **PRIMARY TOOL** - Ask AI a natural language question about document content.
+
+    ⭐ USE THIS FIRST for questions like:
+    - "What is the back rise for size 2?"
+    - "What's the total invoice amount?"
+    - "What is Pinecone's AWS partnership status?"
+
+    This tool searches documents, extracts data, and provides AI-generated answers
+    with inline confidence indicators. It's faster than search → get → extract!
+
+    Args:
+        query: Natural language question (e.g., "What is the back rise for size 2?")
+        folder_path: Optional folder to search within
+        template_id: Optional template filter (e.g., "schema_15")
+
+    Returns:
+        AI-generated answer with:
+        - Inline confidence indicators like [75% ⚠️]
+        - **Embedded markdown link** to view source documents (in the answer text)
+        - query_id: Unique identifier for programmatic access
+        - documents_url: Full URL to filtered documents page
+
+    Example Response:
+        {
+          "answer": "The back rise for size 2 is 7 1/2 inches [75% ⚠️]\n\n---\n\n📄 **Source Documents**: [View the 1 document used in this answer](http://localhost:3000/documents?query_id=abc-123)",
+          "sources": ["GLNLEG_tech_spec.pdf"],
+          "query_id": "abc-123-uuid",
+          "documents_url": "http://localhost:3000/documents?query_id=abc-123"
+        }
+
+    Confidence indicators:
+        [95% ✓] = High confidence (≥80%)
+        [72% ⚠️] = Medium confidence (60-80%)
+        [45% ⚠️ LOW] = Low confidence (<60%) - needs verification
+
+    ⚠️ CRITICAL PRESENTATION INSTRUCTIONS:
+
+    1. ALWAYS present the 'answer' field VERBATIM to the user
+    2. Do NOT summarize, rephrase, or reinterpret the answer
+    3. The answer ALREADY includes inline confidence indicators like [76% ⚠️]
+    4. The answer ALREADY includes a markdown link at the end:
+       📄 **Source Documents**: [View N documents...](url)
+    5. Present this link as clickable - users NEED to see source documents
+
+    Example of correct presentation:
+    User: "What is the back rise for size 2?"
+    You: "The back rise for size 2 is 7 1/2 inches [76% ⚠️]
+
+    ---
+
+    📄 **Source Documents**: [View the 1 document used in this answer](http://localhost:3000/documents?query_id=123)"
+
+    Do NOT say: "The confidence level was 76%..." - the badges are ALREADY in the answer!
+    """
+    return await ai_search.ask_ai(query, folder_path, template_id)
+
 
 @mcp.tool()
 async def search_documents(
@@ -44,10 +109,18 @@ async def search_documents(
     limit: int = 20
 ) -> Dict[str, Any]:
     """
-    Search documents using natural language or keywords with intelligent query understanding.
+    Find documents by keywords or filters - for LISTING documents, not answering questions.
+
+    ⚠️ Use ask_ai instead if you want to ask a QUESTION about document content!
+
+    Use this when you need to:
+    - List all invoices from a vendor
+    - Find documents uploaded last week
+    - Filter by status/template
+    - Get document metadata only
 
     Args:
-        query: Natural language search query (e.g., "invoices over $1000 from last week")
+        query: Keywords to search (e.g., "invoices", "Acme Corp")
         folder_path: Optional folder path to restrict search
         template_name: Filter by template name
         status: Filter by document status
@@ -55,7 +128,7 @@ async def search_documents(
         limit: Maximum number of results (max: 100)
 
     Returns:
-        Search results with documents and query analysis
+        List of matching documents with metadata (NOT answers to questions)
     """
     return await documents.search_documents(
         query=query,
@@ -274,24 +347,177 @@ async def ask_ai(
     Returns:
         AI-generated answer with:
         - Inline confidence indicators like [75% ⚠️]
-        - query_id: Unique identifier for this query
-        - documents_link: URL to view all source documents
-        - view_source_documents: Human-readable link message
+        - **Embedded markdown link** to view source documents (in the answer text)
+        - query_id: Unique identifier for programmatic access
+        - documents_url: Full URL to filtered documents page
 
-    Example:
-        Query: "What is the back rise for size 2 in GLNLEG?"
-        Answer: "The back rise for size 2 is 7 1/2 inches [75% ⚠️]"
-        Documents: "View the 3 source documents used in this answer: http://localhost:3000/documents?query_id=abc-123"
+    Example Response:
+        {
+          "answer": "The back rise for size 2 is 7 1/2 inches [75% ⚠️]\n\n---\n\n📄 **Source Documents**: [View the 1 document used in this answer](http://localhost:3000/documents?query_id=abc-123)",
+          "sources": ["GLNLEG_tech_spec.pdf"],
+          "query_id": "abc-123-uuid",
+          "documents_url": "http://localhost:3000/documents?query_id=abc-123"
+        }
 
     Confidence indicators:
         [95% ✓] = High confidence (≥80%)
         [72% ⚠️] = Medium confidence (60-80%)
         [45% ⚠️ LOW] = Low confidence (<60%) - needs verification
 
-    IMPORTANT: Always display the documents_link or view_source_documents in your response
-    so users can see which documents contributed to the answer.
+    ⚠️ CRITICAL PRESENTATION INSTRUCTIONS:
+
+    1. ALWAYS present the 'answer' field VERBATIM to the user
+    2. Do NOT summarize, rephrase, or reinterpret the answer
+    3. The answer ALREADY includes inline confidence indicators like [76% ⚠️]
+    4. The answer ALREADY includes a markdown link at the end:
+       📄 **Source Documents**: [View N documents...](url)
+    5. Present this link as clickable - users NEED to see source documents
+
+    Example of correct presentation:
+    User: "What is the back rise for size 2?"
+    You: "The back rise for size 2 is 7 1/2 inches [76% ⚠️]
+
+    ---
+
+    📄 **Source Documents**: [View the 1 document used in this answer](http://localhost:3000/documents?query_id=123)"
+
+    Do NOT say: "The confidence level was 76%..." - the badges are ALREADY in the answer!
     """
     return await ai_search.ask_ai(query, folder_path, template_id)
+
+
+# ==================== AGGREGATION TOOLS ====================
+
+@mcp.tool()
+async def aggregate_field(
+    field: str,
+    aggregation_type: str = "stats",
+    filters: Optional[Dict[str, Any]] = None,
+    config: Optional[Dict[str, Any]] = None
+) -> Dict[str, Any]:
+    """
+    Calculate statistics or group data across documents - USE THIS FOR MATH!
+
+    This is your PRIMARY tool for calculations and analytics. Use it instead of
+    trying to do math manually on search results.
+
+    Args:
+        field: Field to aggregate (e.g., "invoice_total", "vendor.keyword")
+        aggregation_type: Type of calculation:
+            - "stats": Sum, average, min, max, count (DEFAULT - use for numbers)
+            - "terms": Group by values, get top N (use for categories/text)
+            - "date_histogram": Group by time periods (use for dates)
+            - "cardinality": Count unique values
+        filters: Optional filters (e.g., {"status": "completed", "vendor": "Acme"})
+        config: Additional settings:
+            - For terms: {"size": 10} = top 10 values
+            - For date_histogram: {"interval": "month"}
+
+    Returns:
+        Calculation results with summary
+
+    Examples:
+        "What's the total invoice amount?"
+        → aggregate_field("invoice_total", "stats")
+        Result: sum=$15,234.50, avg=$1,523.45, count=10
+
+        "Top 5 vendors by document count?"
+        → aggregate_field("vendor.keyword", "terms", config={"size": 5})
+        Result: Acme (25 docs), Beta (18 docs), ...
+
+        "Total spend with Acme Corp?"
+        → aggregate_field("invoice_total", "stats", filters={"vendor": "Acme Corp"})
+        Result: sum=$5,234.50
+
+        "Invoices per month?"
+        → aggregate_field("invoice_date", "date_histogram", config={"interval": "month"})
+        Result: Jan=45, Feb=52, Mar=48, ...
+
+    IMPORTANT: Always use this for calculations - it's fast, accurate, and scales!
+    """
+    return await aggregations.aggregate_field(field, aggregation_type, filters, config)
+
+
+@mcp.tool()
+async def multi_aggregate(
+    aggregations_list: List[Dict[str, Any]],
+    filters: Optional[Dict[str, Any]] = None
+) -> Dict[str, Any]:
+    """
+    Execute multiple calculations in one query (more efficient).
+
+    Use this when you need several calculations at once.
+
+    Args:
+        aggregations_list: List of calculations, each with:
+            - name: Unique name for this calculation
+            - field: Field to aggregate
+            - type: Aggregation type (stats, terms, etc.)
+            - config: Optional settings
+        filters: Filters applied to ALL calculations
+
+    Returns:
+        Dictionary with results for each named calculation
+
+    Example:
+        "Give me total spend, top vendors, and monthly trend"
+        → multi_aggregate([
+            {"name": "total", "field": "invoice_total", "type": "stats"},
+            {"name": "vendors", "field": "vendor.keyword", "type": "terms", "config": {"size": 5}},
+            {"name": "trend", "field": "invoice_date", "type": "date_histogram", "config": {"interval": "month"}}
+        ])
+        Result: {
+            "total": {sum: 15234.50, ...},
+            "vendors": {buckets: [...]},
+            "trend": {buckets: [...]}
+        }
+    """
+    return await aggregations.multi_aggregate(aggregations_list, filters)
+
+
+@mcp.tool()
+async def get_dashboard_stats() -> Dict[str, Any]:
+    """
+    Get pre-configured dashboard statistics for quick overview.
+
+    Returns multiple analytics in one call:
+    - Document status breakdown
+    - Template usage statistics
+    - Monthly upload trends
+    - Total document count
+
+    No arguments needed - just call it!
+
+    Example:
+        "Show me dashboard stats"
+        → get_dashboard_stats()
+        Result: Complete system overview with multiple aggregations
+    """
+    return await aggregations.get_dashboard_stats()
+
+
+@mcp.tool()
+async def get_field_insights(field: str) -> Dict[str, Any]:
+    """
+    Get comprehensive insights for a specific field (auto-detects field type).
+
+    The system automatically runs appropriate calculations based on field type:
+    - Numbers: Stats, percentiles
+    - Text/Categories: Top values, unique count
+    - Dates: Time distribution
+
+    Args:
+        field: Field name to analyze
+
+    Returns:
+        Auto-detected insights for the field
+
+    Example:
+        "Analyze the invoice_total field"
+        → get_field_insights("invoice_total")
+        Result: {statistics: {sum, avg, ...}, unique_count: 10}
+    """
+    return await aggregations.get_field_insights(field)
 
 
 # ==================== RESOURCES ====================

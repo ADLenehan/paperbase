@@ -34,7 +34,8 @@ export default function DocumentDetail() {
 
   // PDF viewer state
   const [currentPage, setCurrentPage] = useState(1);
-  const [highlightedBbox, setHighlightedBbox] = useState(null);
+  const [selectedFieldId, setSelectedFieldId] = useState(null);
+  const [zoom, setZoom] = useState(1.0);
 
   // Field filtering
   const [confidenceFilter, setConfidenceFilter] = useState('all'); // 'all' | 'high' | 'medium' | 'low' | 'needs-review'
@@ -85,16 +86,19 @@ export default function DocumentDetail() {
   };
 
   const handleViewCitation = (field) => {
-    if (!field.source_bbox || field.source_page === null || field.source_page === undefined) {
-      return;
-    }
-
     // Navigate PDF to the page and highlight bbox
-    setCurrentPage(field.source_page);
-    setHighlightedBbox({
-      page: field.source_page,
-      ...field.source_bbox
-    });
+    setSelectedFieldId(field.id);
+    if (field.source_page !== null && field.source_page !== undefined) {
+      setCurrentPage(field.source_page);
+    }
+  };
+
+  const handleFieldClick = (field) => {
+    // Select field and navigate to its location
+    setSelectedFieldId(field.id);
+    if (field.source_page !== null && field.source_page !== undefined) {
+      setCurrentPage(field.source_page);
+    }
   };
 
   const handleVerifyField = (field) => {
@@ -290,6 +294,36 @@ export default function DocumentDetail() {
   const lowCount = document?.fields?.filter(f => f.confidence < thresholds.medium).length || 0;
   const needsReviewCount = document?.fields?.filter(f => f.confidence < thresholds.audit && !f.verified).length || 0;
 
+  // Prepare PDF highlights for all fields with bboxes
+  const allHighlights = filteredFields
+    .filter(f => f.source_bbox && f.source_page === currentPage)
+    .map(f => {
+      const isSelected = f.id === selectedFieldId;
+      const needsReview = f.confidence < thresholds.audit && !f.verified;
+
+      // Color based on confidence or selection
+      let color;
+      if (isSelected) {
+        color = 'blue';
+      } else if (needsReview) {
+        color = 'yellow';
+      } else if (f.confidence >= thresholds.high) {
+        color = 'green';
+      } else if (f.confidence >= thresholds.medium) {
+        color = 'yellow';
+      } else {
+        color = 'red';
+      }
+
+      return {
+        bbox: f.source_bbox,
+        color,
+        label: f.name.replace(/_/g, ' '),
+        page: f.source_page,
+        opacity: isSelected ? 1.0 : 0.3
+      };
+    });
+
   const statusConfig = {
     completed: { color: 'mint', icon: '✓', label: 'Completed' },
     verified: { color: 'mint', icon: '✓', label: 'Verified' },
@@ -435,35 +469,32 @@ export default function DocumentDetail() {
         </div>
       </div>
 
-      {/* Main content: Vertical layout (preview on top, fields below) */}
-      <div className="flex-1 flex flex-col overflow-hidden">
-        {/* Top section: PDF/Image viewer with bbox highlighting */}
-        <div className="h-3/5 border-b border-gray-200 bg-gray-100">
+      {/* Main content: Horizontal layout (PDF left, fields right) */}
+      <div className="flex-1 flex overflow-hidden">
+        {/* Left: PDF/Image viewer with bbox highlighting */}
+        <div className="flex-1 p-6 bg-gray-100">
           <div className="h-full overflow-hidden">
             {document.file_path ? (
               // Check if file is an image or PDF
               document.filename && /\.(png|jpg|jpeg|gif|webp)$/i.test(document.filename) ? (
                 // Image viewer
-                <div className="h-full overflow-auto p-4 flex items-center justify-center bg-gray-50">
+                <div className="h-full overflow-auto flex items-center justify-center bg-white rounded-lg shadow">
                   <img
                     src={`${API_URL}/api/files/${documentId}/preview`}
                     alt={document.filename}
-                    className="max-w-full max-h-full object-contain shadow-lg"
+                    className="max-w-full max-h-full object-contain"
                   />
                 </div>
               ) : (
-                // PDF viewer with bbox highlighting
+                // PDF viewer with bbox highlighting - show ALL bboxes for current page
                 <PDFViewer
                   ref={pdfViewerRef}
                   fileUrl={`${API_URL}/api/files/${documentId}/preview`}
                   page={currentPage}
-                  highlights={highlightedBbox ? [{
-                    bbox: highlightedBbox,
-                    color: 'blue',
-                    label: 'Selected field',
-                    page: highlightedBbox.page || currentPage
-                  }] : []}
+                  highlights={allHighlights}
                   onPageChange={setCurrentPage}
+                  zoom={zoom}
+                  onZoomChange={setZoom}
                 />
               )
             ) : (
@@ -479,8 +510,8 @@ export default function DocumentDetail() {
           </div>
         </div>
 
-        {/* Bottom section: Fields list */}
-        <div className="h-2/5 flex flex-col bg-white overflow-hidden">
+        {/* Right: Fields list */}
+        <div className="w-96 flex flex-col bg-white border-l border-gray-200 overflow-hidden">
           {/* Fields header + filters */}
           <div className="px-6 py-4 border-b border-gray-200 flex-shrink-0">
             <div className="flex items-center justify-between mb-4">
@@ -552,14 +583,23 @@ export default function DocumentDetail() {
               </div>
             ) : (
               filteredFields.map((field) => (
-                <FieldCard
+                <div
                   key={field.id}
-                  field={field}
-                  editable={true}
-                  onSave={handleFieldSave}
-                  onViewCitation={handleViewCitation}
-                  onVerify={handleVerifyField}
-                />
+                  onClick={() => handleFieldClick(field)}
+                  className={`cursor-pointer transition-all ${
+                    selectedFieldId === field.id
+                      ? 'ring-2 ring-periwinkle-500 ring-offset-2 rounded-lg'
+                      : ''
+                  }`}
+                >
+                  <FieldCard
+                    field={field}
+                    editable={true}
+                    onSave={handleFieldSave}
+                    onViewCitation={handleViewCitation}
+                    onVerify={handleVerifyField}
+                  />
+                </div>
               ))
             )}
           </div>

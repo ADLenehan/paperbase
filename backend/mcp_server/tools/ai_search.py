@@ -98,17 +98,16 @@ async def ask_ai(
     Example:
         >>> ask_ai("What is the back rise for size 2 in GLNLEG?")
         {
-            "answer": "The back rise for size 2 is 7 1/2 inches [75% ⚠️]",
+            "answer": "The back rise for size 2 is 7 1/2 inches [75% ⚠️]\n\n---\n\n📄 **Source Documents**: [View the 1 document used](http://localhost:3000/documents?query_id=123)",
             "sources": ["GLNLEG_tech_spec.pdf"],
             "confidence_summary": {"low": 1, "medium": 2, "high": 5},
-            "needs_verification": ["back_rise_size_2"]
+            "needs_verification": [{"field": "back_rise_size_2", "confidence": "75%"}]
         }
 
-    Note:
-        Confidence indicators:
-        - [95% ✓] = High confidence (≥80%)
-        - [72% ⚠️] = Medium confidence (60-80%)
-        - [45% ⚠️ LOW] = Low confidence (<60%) - needs verification
+    ⚠️ PRESENTATION: Present the 'answer' field VERBATIM to the user.
+    Do NOT rephrase or summarize - the answer ALREADY includes:
+        - Inline confidence indicators: [95% ✓] [72% ⚠️] [45% ⚠️ LOW]
+        - Markdown link to source documents at the end
     """
     try:
         async with httpx.AsyncClient(timeout=30.0) as client:
@@ -164,10 +163,19 @@ async def ask_ai(
             query_id = data.get("query_id")
             documents_link = data.get("documents_link")
 
+            # Embed the documents link as markdown in the answer itself
+            # This ensures Claude Desktop will render it as a clickable link
+            answer_with_link = formatted_answer
+            if documents_link and len(source_docs) > 0:
+                doc_word = "document" if len(source_docs) == 1 else "documents"
+                link_section = f"\n\n---\n\n📄 **Source Documents**: [View the {len(source_docs)} {doc_word} used in this answer]({documents_link})"
+                answer_with_link += link_section
+
             return {
-                "answer": formatted_answer,
+                "answer": answer_with_link,  # Answer with embedded markdown link
                 "raw_answer": data.get("answer", ""),  # Include raw for debugging
                 "sources": list(set(source_docs)),  # Deduplicate
+                "source_count": len(source_docs),
                 "total_documents": data.get("total", 0),
                 "explanation": data.get("explanation", ""),
                 "confidence_summary": {
@@ -180,10 +188,11 @@ async def ask_ai(
                 "field_lineage": data.get("field_lineage", {}),
                 "query_confidence": data.get("query_confidence", None),
                 "cached": data.get("cached", False),
-                # NEW: Query history fields
+                # NEW: Query history fields (for programmatic access)
                 "query_id": query_id,
-                "documents_link": documents_link,
-                "view_source_documents": f"View the {len(source_docs)} source documents used in this answer: {documents_link}" if documents_link else None
+                "documents_url": documents_link,  # Full absolute URL
+                # Instructions for Claude to present the link
+                "_presentation_note": "The answer includes a markdown link to view source documents. Present this as a clickable link to the user."
             }
 
     except httpx.TimeoutException:

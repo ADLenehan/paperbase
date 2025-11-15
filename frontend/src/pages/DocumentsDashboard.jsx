@@ -595,15 +595,6 @@ export default function DocumentsDashboard() {
         </div>
       )}
 
-      {/* Stats */}
-      <div className="grid grid-cols-5 gap-4 mb-6">
-        <StatCard label="Total" value={documents.length} active={filter === 'all'} onClick={() => setFilter('all')} />
-        <StatCard label="Analyzing" value={statusCounts.analyzing || 0} active={filter === 'analyzing'} onClick={() => setFilter('analyzing')} />
-        <StatCard label="Matched" value={statusCounts.template_matched || 0} active={filter === 'template_matched'} onClick={() => setFilter('template_matched')} />
-        <StatCard label="Processing" value={statusCounts.processing || 0} active={filter === 'processing'} onClick={() => setFilter('processing')} />
-        <StatCard label="Completed" value={(statusCounts.completed || 0) + (statusCounts.verified || 0)} active={filter === 'completed'} onClick={() => setFilter('completed')} />
-      </div>
-
       {/* Filter Bar with Export Button */}
       <div className="bg-white rounded-lg border p-4 mb-6">
         <div className="flex items-center justify-between">
