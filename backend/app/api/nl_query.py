@@ -13,7 +13,7 @@ from app.models.extraction import Extraction
 from app.models.query_pattern import QueryCache
 from app.models.schema import Schema
 from app.services.claude_service import ClaudeService
-from app.services.elastic_service import ElasticsearchService
+from app.services.postgres_service import PostgresService
 from app.services.schema_registry import SchemaRegistry
 
 logger = logging.getLogger(__name__)
@@ -53,7 +53,7 @@ async def natural_language_query(
     - "What was the average invoice amount last month?"
     """
     claude_service = ClaudeService()
-    elastic_service = ElasticsearchService()
+    postgres_service = PostgresService(db)
     schema_registry = SchemaRegistry(db)
 
     try:
@@ -70,7 +70,7 @@ async def natural_language_query(
             db.commit()
 
             # Execute cached ES query
-            search_results = await elastic_service.search(
+            search_results = await postgres_service.search(
                 query=None,
                 filters=None,
                 custom_query=cached_result.es_query.get("query"),
@@ -150,7 +150,7 @@ async def natural_language_query(
         es_query = parsed_query.get("elasticsearch_query", {})
 
         # Execute the query
-        search_results = await elastic_service.search(
+        search_results = await postgres_service.search(
             query=None,
             filters=None,
             custom_query=es_query.get("query"),
