@@ -113,7 +113,8 @@ async def process_single_document(document_id: int):
         schema = db.query(Schema).filter(Schema.id == document.schema_id).first()
 
         reducto_service = ReductoService()
-        elastic_service = ElasticsearchService()
+        from app.services.postgres_service import PostgresService
+        postgres_service = PostgresService(db)
 
         logger.info(f"Processing document {document_id}: {document.filename}")
 

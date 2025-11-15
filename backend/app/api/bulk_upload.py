@@ -14,7 +14,7 @@ from app.models.physical_file import PhysicalFile
 from app.models.schema import Schema
 from app.models.template import SchemaTemplate
 from app.services.claude_service import ClaudeService
-from app.services.elastic_service import ElasticsearchService
+from app.services.postgres_service import PostgresService
 from app.services.file_service import FileService
 from app.services.reducto_service import ReductoService
 from app.utils.file_organization import get_template_folder, organize_document_file
@@ -1086,7 +1086,7 @@ async def bulk_verify(
     Accept multiple field verifications at once and update all documents
     """
     from app.models.verification import Verification, VerificationSession
-    from app.services.elastic_service import ElasticsearchService
+    from app.services.postgres_service import PostgresService
 
     # Create verification session
     session = VerificationSession(

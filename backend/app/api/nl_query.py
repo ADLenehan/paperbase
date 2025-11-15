@@ -224,7 +224,7 @@ async def natural_language_query(
 
 async def _handle_aggregation_query(
     parsed_query: Dict[str, Any],
-    elastic_service: ElasticsearchService,
+    postgres_service,
     results: List[Dict[str, Any]]
 ) -> Dict[str, Any]:
     """Handle aggregation queries like totals, averages, grouping."""
