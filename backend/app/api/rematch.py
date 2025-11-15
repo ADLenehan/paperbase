@@ -12,7 +12,7 @@ from app.core.database import get_db
 from app.models.document import Document
 from app.models.template import SchemaTemplate
 from app.services.claude_service import ClaudeService
-from app.services.elastic_service import ElasticsearchService
+from app.services.postgres_service import PostgresService
 from app.utils.template_matching import hybrid_match_document
 
 logger = logging.getLogger(__name__)
@@ -49,7 +49,7 @@ async def rematch_all_documents(
     logger.info(f"Rematching {len(unmatched_docs)} documents")
 
     # Initialize services
-    elastic_service = ElasticsearchService()
+    postgres_service = PostgresService(db)
     claude_service = ClaudeService()
 
     # Get all available templates
@@ -159,7 +159,7 @@ async def rematch_single_document(
         )
 
     # Initialize services
-    elastic_service = ElasticsearchService()
+    postgres_service = PostgresService(db)
     claude_service = ClaudeService()
 
     # Get all available templates
