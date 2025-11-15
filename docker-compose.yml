@@ -1,20 +1,19 @@
 services:
-  elasticsearch:
-    image: docker.elastic.co/elasticsearch/elasticsearch:8.11.0
-    container_name: paperbase_elasticsearch
+  postgres:
+    image: postgres:16-alpine
+    container_name: paperbase_postgres
     environment:
-      - discovery.type=single-node
-      - xpack.security.enabled=false
-      - "ES_JAVA_OPTS=-Xms1g -Xmx1g"
+      POSTGRES_USER: paperbase
+      POSTGRES_PASSWORD: paperbase
+      POSTGRES_DB: paperbase
     ports:
-      - "9200:9200"
-      - "9300:9300"
+      - "5432:5432"
     volumes:
-      - elasticsearch_data:/usr/share/elasticsearch/data
+      - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:9200/_cluster/health || exit 1"]
-      interval: 30s
-      timeout: 10s
+      test: ["CMD-SHELL", "pg_isready -U paperbase"]
+      interval: 10s
+      timeout: 5s
       retries: 5
 
   backend:
@@ -23,15 +22,14 @@ services:
     ports:
       - "8000:8000"
     environment:
-      - ELASTICSEARCH_URL=http://elasticsearch:9200
-      - DATABASE_URL=sqlite:///./paperbase.db
+      - DATABASE_URL=postgresql://paperbase:paperbase@postgres:5432/paperbase
       - REDUCTO_API_KEY=${REDUCTO_API_KEY}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
     volumes:
       - ./backend:/app
       - ./backend/uploads:/app/uploads
     depends_on:
-      elasticsearch:
+      postgres:
         condition: service_healthy
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 
@@ -48,5 +46,5 @@ services:
     command: npm run dev -- --host
 
 volumes:
-  elasticsearch_data:
+  postgres_data:
     driver: local

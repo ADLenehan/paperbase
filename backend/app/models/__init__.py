@@ -16,6 +16,7 @@ from app.models.permissions import (
 from app.models.physical_file import PhysicalFile
 from app.models.query_pattern import QueryPattern
 from app.models.schema import Schema
+from app.models.search_index import DocumentSearchIndex, TemplateSignature
 from app.models.settings import Organization, Settings, User
 from app.models.template import SchemaTemplate
 from app.models.verification import Verification, VerificationSession
@@ -44,4 +45,6 @@ __all__ = [
     "Organization",
     "User",
     "BackgroundJob",
+    "DocumentSearchIndex",
+    "TemplateSignature",
 ]

@@ -118,46 +118,62 @@ Consider:
 
 Return JSON array of groups with document_indices, suggested_name, confidence, and common_fields."""
 
-SEMANTIC_QUERY_SYSTEM = """You are a SEMANTIC QUERY TRANSLATOR for document search.
+SEMANTIC_QUERY_SYSTEM = """You are a SEMANTIC QUERY TRANSLATOR for PostgreSQL document search.
 
-YOUR CRITICAL MISSION: Map user's natural language to PRECISE search fields.
+YOUR CRITICAL MISSION: Map user's natural language to PRECISE SQL queries.
 
 YOUR PROCESS:
 1. **Semantic Field Mapping** (HIGHEST PRIORITY):
    - Extract key terms from user query
    - Match terms to field names using the mapping guide provided
-   - Generate multi_match query with field boosting
+   - Generate SQL WHERE clauses with proper JSONB field access
 
 2. **Query Type Detection**:
-   - search: Find specific documents
-   - aggregation: Calculate totals/averages/counts
+   - search: Find specific documents with full-text search
+   - aggregation: Calculate totals/averages/counts with GROUP BY
    - anomaly: Find unusual patterns (duplicates, outliers)
    - comparison: Compare time periods
 
 3. **Filter Extraction**:
-   - Date ranges (use date_context provided for "last month", "Q4 2024", etc.)
-   - Numeric ranges (amounts, counts)
-   - Text filters (vendors, statuses)
-   - Use fuzzy matching for text (e.g., "Acme" matches "Acme Corp", "ACME Inc")
+   - Date ranges: Use PostgreSQL date functions and BETWEEN
+   - Numeric ranges: Use BETWEEN or comparison operators (>=, <=)
+   - Text filters: Use ILIKE for case-insensitive matching
+   - JSONB field access: Use extracted_fields->>'field_name' for text, CAST((extracted_fields->>'field_name')::numeric) for numbers
 
-4. **Clarification Detection**:
+4. **Full-Text Search**:
+   - Use full_text_tsv @@ plainto_tsquery('english', 'search terms') for text search
+   - Use ts_rank(full_text_tsv, plainto_tsquery('english', 'terms')) for relevance scoring
+   - Use ILIKE for partial text matching on specific fields
+
+5. **Clarification Detection**:
    - If query is ambiguous, set needs_clarification=true
    - Ask a specific question to clarify user intent
 
 Return ONLY JSON (no markdown, no explanation outside JSON) with:
-- query_type, needs_clarification, elasticsearch_query, explanation, aggregation, filters, date_range
+- query_type, needs_clarification, sql_conditions, explanation, aggregation, filters, date_range
 
-QUERY CONSTRUCTION RULES:
-- ✅ ALWAYS use multi_match with field boosting for search queries
-- ✅ Map query terms to fields using the semantic guide
-- ✅ Use "range" queries for dates and numbers in filter clauses
-- ✅ Use "term" queries for exact matches (status, IDs) in filter clauses
-- ✅ Use fuzzy "match" queries for text (vendor names, descriptions)
+SQL CONSTRUCTION RULES:
+- ✅ Use full_text_tsv @@ plainto_tsquery('english', 'search terms') for full-text search
+- ✅ Use ts_rank(full_text_tsv, plainto_tsquery('english', 'terms')) DESC for relevance ordering
+- ✅ Use extracted_fields->>'field_name' for accessing JSONB text fields
+- ✅ Use CAST((extracted_fields->>'numeric_field')::numeric) for numeric comparisons
+- ✅ Use ILIKE '%pattern%' for case-insensitive text matching
+- ✅ Use BETWEEN for date and numeric ranges
+- ✅ Use GROUP BY for aggregations with SUM(), AVG(), COUNT()
 - ⚠️  CRITICAL: Distinguish VALUE EXTRACTION from TEXT SEARCH
-  - "What [field] is..." / "What [field] are..." = VALUE EXTRACTION → use exists query
-  - "Find documents about [topic]" = TEXT SEARCH → use multi_match
-- ❌ NEVER create {"match": {"full_text": "..."}} queries (too broad)
-- ❌ NEVER add template_name filters (system handles this automatically)"""
+  - "What [field] is..." / "What [field] are..." = VALUE EXTRACTION → check field exists
+  - "Find documents about [topic]" = TEXT SEARCH → use full-text search
+- ❌ NEVER use Elasticsearch DSL syntax (no "match", "bool", "must", etc.)
+- ❌ NEVER add template_name filters (system handles this automatically)
+
+SQL EXAMPLES:
+- Text search: "full_text_tsv @@ plainto_tsquery('english', 'invoice acme')"
+- Field filter: "extracted_fields->>'vendor_name' ILIKE '%acme%'"
+- Numeric range: "CAST((extracted_fields->>'invoice_total')::numeric) >= 5000"
+- Date range: "CAST((extracted_fields->>'invoice_date')::date) BETWEEN '2024-01-01' AND '2024-12-31'"
+- Exists check: "extracted_fields ? 'field_name'"
+- Aggregation: "SELECT SUM(CAST((extracted_fields->>'amount')::numeric)) FROM document_search_index WHERE ..."
+"""
 
 
 class ClaudeService:
@@ -1374,7 +1390,7 @@ Keep it concise (2-3 sentences)."""
                 "query_type": "search|aggregation|anomaly|comparison",
                 "needs_clarification": bool,
                 "clarifying_question": str (if needs_clarification),
-                "elasticsearch_query": {...},
+                "sql_conditions": {"where": "...", "order_by": "...", "limit": 10},
                 "explanation": str,
                 "aggregation": {"type": "sum|avg|count|group_by", "field": "...", "value_field": "..."},
                 "filters": {...},
