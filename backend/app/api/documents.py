@@ -11,7 +11,7 @@ from app.core.database import get_db
 from app.models.document import Document, ExtractedField
 from app.models.schema import Schema
 from app.models.template import SchemaTemplate
-from app.services.elastic_service import ElasticsearchService
+from app.services.postgres_service import PostgresService
 from app.services.reducto_service import ReductoService
 from app.utils.bbox_utils import normalize_bbox
 
@@ -391,7 +391,7 @@ async def process_single_document(document_id: int):
                 for chunk in parse_result.get("chunks", [])
             ])
 
-            es_id = await elastic_service.index_document(
+            es_id = await postgres_service.index_document(
                 document_id=document.id,
                 filename=document.filename,
                 extracted_fields=extracted_fields,
@@ -703,8 +703,8 @@ async def delete_document(document_id: int, db: Session = Depends(get_db)):
         # Delete from Elasticsearch if indexed
         if document.elasticsearch_id:
             try:
-                elastic_service = ElasticsearchService()
-                await elastic_service.delete_document(document.elasticsearch_id)
+                postgres_service = PostgresService(db)
+                await postgres_service.delete_document(document.id)
                 logger.info(f"Deleted document {document_id} from Elasticsearch")
             except Exception as e:
                 logger.warning(f"Failed to delete document from Elasticsearch: {e}")
@@ -831,8 +831,8 @@ async def mark_document_verified(
 
         # Update Elasticsearch to keep status in sync
         try:
-            elastic_service = ElasticsearchService()
-            await elastic_service.update_document(
+            postgres_service = PostgresService(db)
+            await postgres_service.update_document(
                 doc_id=document.elasticsearch_id,
                 updates={"status": "verified"}
             )

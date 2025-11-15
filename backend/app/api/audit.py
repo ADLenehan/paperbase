@@ -11,7 +11,7 @@ from app.core.database import get_db
 from app.models.document import Document, ExtractedField
 from app.models.verification import Verification
 from app.services.claude_service import ClaudeService
-from app.services.elastic_service import ElasticsearchService
+from app.services.postgres_service import PostgresService
 from app.services.settings_service import SettingsService
 from app.utils.bbox_utils import normalize_bbox
 
@@ -315,8 +315,8 @@ async def verify_field(
     # Update Elasticsearch if value changed
     if verified_value != field.field_value:
         try:
-            elastic_service = ElasticsearchService()
-            await elastic_service.update_document(
+            postgres_service = PostgresService(db)
+            await postgres_service.update_document(
                 document_id=field.document_id,
                 updated_fields={field.field_name: verified_value}
             )
@@ -441,7 +441,7 @@ async def verify_field_and_regenerate_answer(
     updated_documents = []
     try:
         for doc_id in request.document_ids:
-            es_doc = await elastic_service.get_document_by_id(doc_id)
+            es_doc = await postgres_service.get_document(doc_id)
             if es_doc:
                 updated_documents.append(es_doc)
     except Exception as e:
@@ -871,7 +871,7 @@ async def bulk_verify_and_regenerate(
     updated_documents = []
     try:
         for doc_id in request.document_ids:
-            es_doc = await elastic_service.get_document_by_id(doc_id)
+            es_doc = await postgres_service.get_document(doc_id)
             if es_doc:
                 updated_documents.append(es_doc)
     except Exception as e:
