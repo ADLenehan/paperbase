@@ -27,10 +27,11 @@ class FieldExtractionService:
     extract it from all previously processed documents.
     """
 
-    def __init__(self):
+    def __init__(self, db=None):
         self.claude_service = ClaudeService()
         self.reducto_service = ReductoService()
-        self.postgres_service = ElasticsearchService()
+        self.db = db
+        self.postgres_service = PostgresService(db) if db else None
 
     async def extract_field_from_all_docs(
         self,
@@ -224,20 +225,17 @@ class FieldExtractionService:
                             )
                         db.add(new_field)
 
-                    # Update Elasticsearch if schema and index exist
                     if schema:
                         try:
-                            # Create ES service with schema-specific index
-                            es_service = PostgresService(db)
-                            es_service.index_name = f"docs_{schema.name.lower().replace(' ', '_')}"
+                            postgres_service = PostgresService(db)
 
-                            await es_service.update_document(
+                            await postgres_service.update_document(
                                 document_id=doc.id,
                                 updated_fields={field_config["name"]: extracted_value}
                             )
-                        except Exception as es_error:
-                            logger.warning(f"Failed to update ES for doc {doc.id}: {es_error}")
-                            # Don't fail the job if ES update fails
+                        except Exception as pg_error:
+                            logger.warning(f"Failed to update PostgreSQL for doc {doc.id}: {pg_error}")
+                            # Don't fail the job if update fails
 
                     # If low confidence, add to audit queue
                     if confidence < 0.6:
