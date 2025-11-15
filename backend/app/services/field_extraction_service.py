@@ -13,7 +13,7 @@ from app.models.document import Document, ExtractedField
 from app.models.schema import Schema
 from app.models.verification import Verification
 from app.services.claude_service import ClaudeService
-from app.services.elastic_service import ElasticsearchService
+from app.services.postgres_service import PostgresService
 from app.services.reducto_service import ReductoService
 
 logger = logging.getLogger(__name__)
@@ -30,7 +30,7 @@ class FieldExtractionService:
     def __init__(self):
         self.claude_service = ClaudeService()
         self.reducto_service = ReductoService()
-        self.elastic_service = ElasticsearchService()
+        self.postgres_service = ElasticsearchService()
 
     async def extract_field_from_all_docs(
         self,
@@ -228,7 +228,7 @@ class FieldExtractionService:
                     if schema:
                         try:
                             # Create ES service with schema-specific index
-                            es_service = ElasticsearchService()
+                            es_service = PostgresService(db)
                             es_service.index_name = f"docs_{schema.name.lower().replace(' ', '_')}"
 
                             await es_service.update_document(
