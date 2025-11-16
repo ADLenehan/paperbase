@@ -296,10 +296,12 @@ export default function DocumentDetail() {
 
   // Prepare PDF highlights for all fields with bboxes
   const allHighlights = filteredFields
-    .filter(f => f.source_bbox && f.source_page === currentPage)
+    .filter(f => f.source_bbox)
     .map(f => {
       const isSelected = f.id === selectedFieldId;
       const needsReview = f.confidence < thresholds.audit && !f.verified;
+
+      const normalizedPage = f.source_page === 0 ? 1 : (f.source_page || 1);
 
       // Color based on confidence or selection
       let color;
@@ -319,7 +321,7 @@ export default function DocumentDetail() {
         bbox: f.source_bbox,
         color,
         label: f.name.replace(/_/g, ' '),
-        page: f.source_page,
+        page: normalizedPage,
         opacity: isSelected ? 1.0 : 0.3
       };
     });

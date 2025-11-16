@@ -714,7 +714,7 @@ class ReductoService:
                         "value": value,  # Keep as list/array
                         "field_type": field_type,
                         "confidence": float(avg_confidence),
-                        "source_page": int(page) if page else None,
+                        "source_page": int(page) if page is not None else None,
                         "source_bbox": bbox
                     }
                 else:
@@ -723,7 +723,7 @@ class ReductoService:
                         "value": str(value) if value is not None else "",
                         "field_type": field_type,
                         "confidence": float(confidence),
-                        "source_page": int(page) if page else None,
+                        "source_page": int(page) if page is not None else None,
                         "source_bbox": bbox
                     }
 
