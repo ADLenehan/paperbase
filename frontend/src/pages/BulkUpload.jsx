@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import FieldEditor from '../components/FieldEditor';
 import ProcessingModal from '../components/modals/ProcessingModal';
+import { fetchWithAuth } from '../utils/fetchWithAuth';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
@@ -139,7 +140,7 @@ export default function BulkUpload() {
       // Show parsing stage
       setProgress({ stage: 'parsing', current: 0, total: files.length, message: 'Parsing documents with Reducto...' });
 
-      const response = await fetch(`${API_URL}/api/bulk/upload-and-analyze`, {
+      const response = await fetchWithAuth('/api/bulk/upload-and-analyze', {
         method: 'POST',
         body: formData,
       });

@@ -282,13 +282,13 @@ async def upload_and_analyze(
     # Step 3: Cluster similar documents with Elasticsearch (FAST & FREE)
     postgres_service = PostgresService(db)
 
-    # Use ES clustering instead of Claude grouping (eliminates 1 guaranteed Claude call!)
-    clusters = await elastic_service.cluster_uploaded_documents(
+    # Use Postgres clustering instead of Claude grouping (eliminates 1 guaranteed Claude call!)
+    clusters = await postgres_service.cluster_uploaded_documents(
         documents=uploaded_docs,
         similarity_threshold=0.75  # Group docs with 75%+ similarity
     )
 
-    logger.info(f"ES clustered {len(uploaded_docs)} docs into {len(clusters)} groups")
+    logger.info(f"Postgres clustered {len(uploaded_docs)} docs into {len(clusters)} groups")
 
     # Step 4: Match each cluster to templates using HYBRID matching (ES + Claude fallback)
     claude_service = ClaudeService()
@@ -311,10 +311,10 @@ async def upload_and_analyze(
             Document.id == cluster["representative_doc_id"]
         ).first()
 
-        # Use hybrid matching (ES first, Claude fallback only if needed)
+        # Use hybrid matching (Postgres first, Claude fallback only if needed)
         match_result = await hybrid_match_document(
             document=representative_doc,
-            elastic_service=elastic_service,
+            postgres_service=postgres_service,
             claude_service=claude_service,
             available_templates=template_data,
             db=db
@@ -931,7 +931,7 @@ async def create_new_template(
                 sample_text = chunks[0].get("content", "")
 
         try:
-            await elastic_service.index_template_signature(
+            await postgres_service.index_template_signature(
                 template_id=schema.id,
                 template_name=request.template_name,
                 field_names=field_names,
@@ -1025,7 +1025,7 @@ async def create_new_template(
                 potential_matches = await auto_match_documents(
                     db=db,
                     documents=unmatched_docs,
-                    elastic_service=elastic_service,
+                    postgres_service=postgres_service,
                     claude_service=claude_service,
                     available_templates=template_data,
                     threshold=0.70
@@ -1122,16 +1122,16 @@ async def bulk_verify(
             if v['action'] == 'corrected':
                 field.verified_value = v['verified_value']
 
-            # Update in Elasticsearch
+            # Update in PostgreSQL search index
             doc = db.query(Document).filter(Document.id == field.document_id).first()
-            if doc and doc.elasticsearch_id:
+            if doc:
                 try:
-                    await elastic_service.update_document(
-                        doc.elasticsearch_id,
+                    await postgres_service.update_document(
+                        doc.id,
                         {v['field_name']: v['verified_value']}
                     )
                 except Exception as e:
-                    logger.error(f"Failed to update ES: {e}")
+                    logger.error(f"Failed to update Postgres search index: {e}")
 
             updated_count += 1
 

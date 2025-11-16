@@ -469,49 +469,10 @@ export default function DocumentDetail() {
         </div>
       </div>
 
-      {/* Main content: Horizontal layout (PDF left, fields right) */}
+      {/* Main content: Horizontal layout (fields left, PDF right) */}
       <div className="flex-1 flex overflow-hidden">
-        {/* Left: PDF/Image viewer with bbox highlighting */}
-        <div className="flex-1 p-6 bg-gray-100">
-          <div className="h-full overflow-hidden">
-            {document.file_path ? (
-              // Check if file is an image or PDF
-              document.filename && /\.(png|jpg|jpeg|gif|webp)$/i.test(document.filename) ? (
-                // Image viewer
-                <div className="h-full overflow-auto flex items-center justify-center bg-white rounded-lg shadow">
-                  <img
-                    src={`${API_URL}/api/files/${documentId}/preview`}
-                    alt={document.filename}
-                    className="max-w-full max-h-full object-contain"
-                  />
-                </div>
-              ) : (
-                // PDF viewer with bbox highlighting - show ALL bboxes for current page
-                <PDFViewer
-                  ref={pdfViewerRef}
-                  fileUrl={`${API_URL}/api/files/${documentId}/preview`}
-                  page={currentPage}
-                  highlights={allHighlights}
-                  onPageChange={setCurrentPage}
-                  zoom={zoom}
-                  onZoomChange={setZoom}
-                />
-              )
-            ) : (
-              <div className="flex items-center justify-center h-full text-gray-500">
-                <div className="text-center">
-                  <svg className="w-16 h-16 mx-auto mb-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                  </svg>
-                  <p className="text-sm">No file available</p>
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* Right: Fields list */}
-        <div className="w-96 flex flex-col bg-white border-l border-gray-200 overflow-hidden">
+        {/* Left: Fields list */}
+        <div className="w-96 flex flex-col bg-white border-r border-gray-200 overflow-hidden">
           {/* Fields header + filters */}
           <div className="px-6 py-4 border-b border-gray-200 flex-shrink-0">
             <div className="flex items-center justify-between mb-4">
@@ -601,6 +562,45 @@ export default function DocumentDetail() {
                   />
                 </div>
               ))
+            )}
+          </div>
+        </div>
+
+        {/* Right: PDF/Image viewer with bbox highlighting */}
+        <div className="flex-1 p-6 bg-gray-100">
+          <div className="h-full overflow-hidden">
+            {document.file_path ? (
+              // Check if file is an image or PDF
+              document.filename && /\.(png|jpg|jpeg|gif|webp)$/i.test(document.filename) ? (
+                // Image viewer
+                <div className="h-full overflow-auto flex items-center justify-center bg-white rounded-lg shadow">
+                  <img
+                    src={`${API_URL}/api/files/${documentId}/preview`}
+                    alt={document.filename}
+                    className="max-w-full max-h-full object-contain"
+                  />
+                </div>
+              ) : (
+                // PDF viewer with bbox highlighting - show ALL bboxes for current page
+                <PDFViewer
+                  ref={pdfViewerRef}
+                  fileUrl={`${API_URL}/api/files/${documentId}/preview`}
+                  page={currentPage}
+                  highlights={allHighlights}
+                  onPageChange={setCurrentPage}
+                  zoom={zoom}
+                  onZoomChange={setZoom}
+                />
+              )
+            ) : (
+              <div className="flex items-center justify-center h-full text-gray-500">
+                <div className="text-center">
+                  <svg className="w-16 h-16 mx-auto mb-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                  </svg>
+                  <p className="text-sm">No file available</p>
+                </div>
+              </div>
             )}
           </div>
         </div>
