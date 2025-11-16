@@ -2,7 +2,7 @@
 MCP Tools for Paperbase
 
 Exposes document search, template management, analytics,
-audit functionality, and AI-powered search through MCP tool protocol.
+audit functionality, AI-powered search, and aggregations through MCP tool protocol.
 """
 
 from .documents import (
@@ -27,6 +27,12 @@ from .audit import (
 from .ai_search import (
     ask_ai
 )
+from .aggregations import (
+    aggregate_field,
+    multi_aggregate,
+    get_dashboard_stats,
+    get_field_insights
+)
 
 __all__ = [
     "search_documents",
@@ -40,5 +46,9 @@ __all__ = [
     "get_processing_timeline",
     "get_audit_queue",
     "get_low_confidence_fields",
-    "ask_ai"
+    "ask_ai",
+    "aggregate_field",
+    "multi_aggregate",
+    "get_dashboard_stats",
+    "get_field_insights"
 ]

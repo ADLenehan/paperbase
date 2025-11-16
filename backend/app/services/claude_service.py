@@ -750,6 +750,203 @@ Return the complete modified fields array in JSON format."""
             logger.error(f"Error modifying schema with Claude: {e}", exc_info=True)
             raise ClaudeError(f"Unexpected error during schema modification: {str(e)}", e)
 
+    async def suggest_field_from_existing_docs(
+        self,
+        user_description: str,
+        sample_documents: List[Dict[str, Any]],
+        total_document_count: int
+    ) -> Dict[str, Any]:
+        """
+        Suggest a new field based on user description and existing document samples
+
+        This method analyzes existing parsed documents to suggest a field configuration
+        and shows preview extractions from sample documents.
+
+        Args:
+            user_description: What the user wants to extract (e.g., "payment terms")
+            sample_documents: List of parsed documents (from reducto_parse_result)
+            total_document_count: Total number of documents in the template
+
+        Returns:
+            {
+                "field": {
+                    "name": "payment_terms",
+                    "type": "text",
+                    "required": false,
+                    "description": "...",
+                    "extraction_hints": ["..."],
+                    "confidence_threshold": 0.75
+                },
+                "sample_extractions": [
+                    {"filename": "doc1.pdf", "value": "Net 30", "confidence": 0.92},
+                    ...
+                ],
+                "estimated_success_rate": 0.80,
+                "estimated_cost": 2.34,
+                "estimated_time_seconds": 120,
+                "total_documents": 234
+            }
+        """
+        if not sample_documents:
+            raise ValueError("No sample documents provided")
+
+        # Build prompt
+        prompt = f"""The user wants to add a new field to their existing document template.
+
+User's description: "{user_description}"
+
+Analyze these {len(sample_documents)} sample documents and:
+1. Suggest a field name (snake_case)
+2. Determine the field type (text, date, number, boolean, array, table, array_of_objects)
+3. Write a clear description
+4. Provide extraction hints (keywords to look for)
+5. Set a confidence threshold (0.6-0.9)
+6. Extract this field from each sample document
+
+Return JSON in this exact format:
+{{
+    "field": {{
+        "name": "payment_terms",
+        "type": "text",
+        "required": false,
+        "description": "Payment terms specified in the invoice",
+        "extraction_hints": ["Terms:", "Payment Terms:", "Net"],
+        "confidence_threshold": 0.75
+    }},
+    "sample_extractions": [
+        {{"filename": "doc1.pdf", "value": "Net 30", "confidence": 0.92}},
+        {{"filename": "doc2.pdf", "value": "Due on Receipt", "confidence": 0.88}},
+        {{"filename": "doc3.pdf", "value": null, "confidence": 0.0}}
+    ]
+}}
+
+Sample documents:
+{json.dumps(sample_documents[:5], indent=2)}"""
+
+        try:
+            logger.info(f"Requesting field suggestion from Claude for: {user_description}")
+
+            message = self.client.messages.create(
+                model=self.model,
+                max_tokens=2048,
+                system=[{
+                    "type": "text",
+                    "text": SCHEMA_GENERATION_SYSTEM,
+                    "cache_control": {"type": "ephemeral"}
+                }],
+                messages=[{"role": "user", "content": prompt}]
+            )
+
+            response_text = message.content[0].text.strip()
+
+            # Remove markdown code blocks if present
+            if response_text.startswith("```"):
+                response_text = response_text.split("```")[1]
+                if response_text.startswith("json"):
+                    response_text = response_text[4:]
+                response_text = response_text.strip()
+
+            suggestion = json.loads(response_text)
+
+            # Validate structure
+            if "field" not in suggestion or "sample_extractions" not in suggestion:
+                raise ValueError("Invalid suggestion format")
+
+            # Calculate estimates
+            successful_extractions = [
+                e for e in suggestion["sample_extractions"]
+                if e.get("value") and e.get("value") != "(not found)"
+            ]
+            success_rate = len(successful_extractions) / len(suggestion["sample_extractions"])
+
+            # Cost: $0.01 per doc (Claude extraction from cached parse)
+            estimated_cost = total_document_count * 0.01
+
+            # Time: ~0.5 seconds per doc (fast with cached parse)
+            estimated_time = total_document_count * 0.5
+
+            result = {
+                "field": suggestion["field"],
+                "sample_extractions": suggestion["sample_extractions"],
+                "estimated_success_rate": success_rate,
+                "estimated_cost": estimated_cost,
+                "estimated_time_seconds": int(estimated_time),
+                "total_documents": total_document_count
+            }
+
+            logger.info(f"Generated field suggestion: {result['field']['name']} "
+                       f"(success rate: {success_rate:.0%})")
+
+            return result
+
+        except json.JSONDecodeError as e:
+            logger.error(f"Failed to parse Claude response as JSON: {e}")
+            raise ClaudeError("Claude did not return valid JSON", e)
+        except Exception as e:
+            logger.error(f"Error suggesting field: {e}")
+            raise ClaudeError(f"Failed to suggest field: {str(e)}", e)
+
+    async def extract_single_field(
+        self,
+        parse_result: Dict[str, Any],
+        field_config: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """
+        Extract a single field from a parsed document
+
+        Used when adding a new field to existing documents.
+
+        Args:
+            parse_result: Reducto parse result (from physical_file.reducto_parse_result)
+            field_config: Field configuration with name, type, description, hints
+
+        Returns:
+            {
+                "value": extracted_value,
+                "confidence": 0.85
+            }
+        """
+        prompt = f"""Extract the following field from this document:
+
+Field: {field_config['name']}
+Type: {field_config['type']}
+Description: {field_config.get('description', '')}
+Hints: {', '.join(field_config.get('extraction_hints', []))}
+
+Document:
+{json.dumps(parse_result, indent=2)[:3000]}
+
+Return ONLY JSON:
+{{
+    "value": extracted_value_or_null,
+    "confidence": 0.85
+}}"""
+
+        try:
+            message = self.client.messages.create(
+                model=self.model,
+                max_tokens=512,
+                messages=[{"role": "user", "content": prompt}]
+            )
+
+            response_text = message.content[0].text.strip()
+
+            # Remove markdown if present
+            if response_text.startswith("```"):
+                response_text = response_text.split("```")[1]
+                if response_text.startswith("json"):
+                    response_text = response_text[4:]
+                response_text = response_text.strip()
+
+            extraction = json.loads(response_text)
+
+            return extraction
+
+        except Exception as e:
+            logger.error(f"Error extracting field {field_config['name']}: {e}")
+            # Return empty extraction instead of failing
+            return {"value": None, "confidence": 0.0}
+
     async def match_document_to_template(
         self,
         parsed_document: Dict[str, Any],

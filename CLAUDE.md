@@ -15,7 +15,7 @@ A no-code document extraction platform that uses Reducto for parsing, Elasticsea
 - 🎯 **Impact Phase 1**: <10 seconds per field (down from ~30s), 100% context preservation
 - 🎯 **Impact Phase 2**: <20 seconds for 5 fields (vs ~50s), 70% cost reduction for batch
 
-**See**: [INLINE_AUDIT_IMPLEMENTATION.md](./INLINE_AUDIT_IMPLEMENTATION.md) | [BATCH_AUDIT_IMPLEMENTATION.md](./BATCH_AUDIT_IMPLEMENTATION.md)
+**See**: [INLINE_AUDIT_IMPLEMENTATION.md](./docs/implementation/INLINE_AUDIT_IMPLEMENTATION.md) | [BATCH_AUDIT_IMPLEMENTATION.md](./docs/implementation/BATCH_AUDIT_IMPLEMENTATION.md)
 
 ### Previous Update: Complex Data Extraction (2025-11-02)
 - ✅ Support for arrays, tables, and array_of_objects field types
@@ -36,7 +36,7 @@ A no-code document extraction platform that uses Reducto for parsing, Elasticsea
 - ✅ Batch processing API
 - ⏳ Frontend components pending
 
-**See**: [MULTI_TEMPLATE_EXTRACTION.md](./MULTI_TEMPLATE_EXTRACTION.md) | [Quick Start](./MULTI_TEMPLATE_QUICKSTART.md)
+**See**: [MULTI_TEMPLATE_EXTRACTION.md](./docs/features/MULTI_TEMPLATE_EXTRACTION.md) | [Quick Start](./docs/features/MULTI_TEMPLATE_QUICKSTART.md)
 
 ### Elasticsearch Optimization (2025-10-23)
 - ✅ Production-ready mapping with `dynamic: strict`
@@ -363,7 +363,7 @@ docker-compose down -v
 - `GET /api/sharing/links/{token}` - Get share link details
 - `DELETE /api/sharing/links/{link_id}` - Delete share link
 
-**See**: [AUTHENTICATION_IMPLEMENTATION.md](./AUTHENTICATION_IMPLEMENTATION.md) for complete auth details
+**See**: [AUTHENTICATION_IMPLEMENTATION.md](./docs/features/AUTHENTICATION_IMPLEMENTATION.md) for complete auth details
 
 ### Settings Management (Hierarchical Configuration)
 - `GET /api/settings/` - Get all settings with hierarchy resolution
@@ -629,7 +629,7 @@ After ANY model refactoring:
 4. **File Operation Tests**: Upload, download, serve, organize
 5. **UI Tests**: Verify frontend displays correct data
 
-**Create a compatibility audit document** (see: SHA256_DEDUP_COMPLETE_COMPATIBILITY_AUDIT.md)
+**Create a compatibility audit document** (see: [docs/fixes/SHA256_DEDUP_COMPLETE_COMPATIBILITY_AUDIT.md](./docs/fixes/SHA256_DEDUP_COMPLETE_COMPATIBILITY_AUDIT.md))
 
 #### 6. **Common Pitfalls to Avoid**
 
@@ -697,9 +697,9 @@ Every data refactoring MUST include:
 5. **Testing Checklist**: What to test before deployment
 
 **Examples**:
-- [SHA256_DEDUPLICATION_IMPLEMENTATION.md](./SHA256_DEDUPLICATION_IMPLEMENTATION.md)
-- [DEDUPLICATION_INTEGRATION_FIXES.md](./DEDUPLICATION_INTEGRATION_FIXES.md)
-- [SHA256_DEDUP_COMPLETE_COMPATIBILITY_AUDIT.md](./SHA256_DEDUP_COMPLETE_COMPATIBILITY_AUDIT.md)
+- [SHA256_DEDUPLICATION_IMPLEMENTATION.md](./docs/implementation/SHA256_DEDUPLICATION_IMPLEMENTATION.md)
+- [DEDUPLICATION_INTEGRATION_FIXES.md](./docs/fixes/DEDUPLICATION_INTEGRATION_FIXES.md)
+- [SHA256_DEDUP_COMPLETE_COMPATIBILITY_AUDIT.md](./docs/fixes/SHA256_DEDUP_COMPLETE_COMPATIBILITY_AUDIT.md)
 
 #### 9. **Code Review Checklist for Data Refactoring PRs**
 
@@ -748,7 +748,7 @@ Before implementing ANY data model change:
 ### Internal Documentation
 - **[Feature Catalog](docs/features/README.md)** - Complete feature documentation
 - **[Project Plan](PROJECT_PLAN.md)** - Roadmap and future features
-- **[Authentication Guide](AUTHENTICATION_IMPLEMENTATION.md)** - Auth implementation details
+- **[Authentication Guide](docs/features/AUTHENTICATION_IMPLEMENTATION.md)** - Auth implementation details
 - **[Pipeline Optimization](docs/features/PIPELINE_OPTIMIZATION.md)** - Reducto cost optimization
 
 ### External Resources
@@ -841,10 +841,10 @@ Before implementing ANY data model change:
 - **Status**: Backend complete, frontend pending
 
 ### Documentation
-- **[Inline Audit Guide](INLINE_AUDIT_IMPLEMENTATION.md)** - NEW audit workflow (Phase 1)
-- [AUTHENTICATION_IMPLEMENTATION.md](./AUTHENTICATION_IMPLEMENTATION.md) - Complete auth guide
+- **[Inline Audit Guide](docs/implementation/INLINE_AUDIT_IMPLEMENTATION.md)** - NEW audit workflow (Phase 1)
+- [AUTHENTICATION_IMPLEMENTATION.md](./docs/features/AUTHENTICATION_IMPLEMENTATION.md) - Complete auth guide
 - [PERMISSIONS_ARCHITECTURE.md](./docs/features/PERMISSIONS_ARCHITECTURE.md) - RBAC design
-- [NEW_ARCHITECTURE.md](./NEW_ARCHITECTURE.md) - Complete implementation details
+- [NEW_ARCHITECTURE.md](./docs/architecture/NEW_ARCHITECTURE.md) - Complete implementation details
 - [PROJECT_PLAN.md](./PROJECT_PLAN.md) - Future feature roadmap
 - [docs/features/](./docs/features/) - Complete feature catalog
 
