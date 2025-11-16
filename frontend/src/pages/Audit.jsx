@@ -57,8 +57,9 @@ export default function Audit() {
       setShowCorrectionInput(false);
 
       // Jump to the page where the field is located
-      if (item.source_page) {
-        setCurrentPage(item.source_page);
+      if (item.source_page !== null && item.source_page !== undefined) {
+        const normalizedPage = item.source_page === 0 ? 1 : item.source_page;
+        setCurrentPage(normalizedPage);
       }
     } else {
       setCurrentItem(null);
@@ -271,11 +272,12 @@ export default function Audit() {
   if (!currentItem) return null;
 
   // Prepare PDF highlights
+  const normalizedPage = currentItem.source_page === 0 ? 1 : (currentItem.source_page || 1);
   const highlights = currentItem.source_bbox ? [{
     bbox: currentItem.source_bbox,
     color: currentItem.confidence < 0.4 ? 'red' : currentItem.confidence < 0.6 ? 'yellow' : 'green',
     label: currentItem.field_name,
-    page: currentItem.source_page
+    page: normalizedPage
   }] : [];
 
   const fileUrl = `${API_URL}/api/files/${currentItem.document_id}/preview`;

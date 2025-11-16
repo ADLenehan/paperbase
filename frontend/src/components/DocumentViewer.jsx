@@ -245,33 +245,43 @@ export default function DocumentViewer({
  */
 function BBoxOverlays({ highlights, pageWidth, pageHeight, currentPage, zoom = 1.0 }) {
   return (
-    <div className="absolute top-0 left-0 pointer-events-none">
+    <div 
+      className="absolute top-0 left-0 pointer-events-none z-50"
+      style={{ width: `${pageWidth}px`, height: `${pageHeight}px` }}
+    >
       {highlights
         .filter(h => !h.page || h.page === currentPage)
         .map((highlight, index) => {
           if (!highlight.bbox) return null;
 
-          // Handle both object format {left, top, width, height} and array format [x, y, w, h]
-          // Bbox coordinates from Reducto are NORMALIZED [0-1], need to scale by page dimensions
-          let x, y, width, height;
+          let rawX, rawY, rawW, rawH;
           if (Array.isArray(highlight.bbox)) {
-            // Array format: [x, y, width, height] - all normalized [0-1]
             if (highlight.bbox.length < 4) return null;
-            [x, y, width, height] = highlight.bbox;
+            [rawX, rawY, rawW, rawH] = highlight.bbox;
           } else {
-            // Object format: {left, top, width, height} - all normalized [0-1]
-            x = highlight.bbox.left || 0;
-            y = highlight.bbox.top || 0;
-            width = highlight.bbox.width || 0;
-            height = highlight.bbox.height || 0;
+            rawX = highlight.bbox.left ?? highlight.bbox.x ?? 0;
+            rawY = highlight.bbox.top ?? highlight.bbox.y ?? 0;
+            rawW = highlight.bbox.width ?? highlight.bbox.w ?? 0;
+            rawH = highlight.bbox.height ?? highlight.bbox.h ?? 0;
           }
 
-          // Scale normalized coordinates [0-1] to pixel coordinates
-          // pageWidth and pageHeight already include zoom
-          const pixelX = x * pageWidth;
-          const pixelY = y * pageHeight;
-          const pixelWidth = width * pageWidth;
-          const pixelHeight = height * pageHeight;
+          // Detect coordinate system: normalized [0-1] vs absolute
+          const isNormalized = rawX <= 1 && rawY <= 1 && rawW <= 1 && rawH <= 1;
+
+          let pixelX, pixelY, pixelWidth, pixelHeight;
+          if (isNormalized) {
+            // Normalized coordinates: scale by page dimensions
+            // pageWidth and pageHeight already include zoom
+            pixelX = rawX * pageWidth;
+            pixelY = rawY * pageHeight;
+            pixelWidth = rawW * pageWidth;
+            pixelHeight = rawH * pageHeight;
+          } else {
+            pixelX = rawX * zoom;
+            pixelY = rawY * zoom;
+            pixelWidth = rawW * zoom;
+            pixelHeight = rawH * zoom;
+          }
 
           // Color mapping based on confidence or explicit color
           // Using consistent colors from DocumentsDashboard status badges
