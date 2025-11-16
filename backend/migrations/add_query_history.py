@@ -32,30 +32,52 @@ def migrate():
     engine = create_engine(settings.DATABASE_URL)
 
     with engine.connect() as conn:
-        # Check if table already exists
-        result = conn.execute(text("""
-            SELECT name FROM sqlite_master
-            WHERE type='table' AND name='query_history'
-        """))
+        # Check if table already exists (works for both SQLite and PostgreSQL)
+        if settings.DATABASE_URL.startswith("postgresql"):
+            result = conn.execute(text("""
+                SELECT EXISTS (
+                    SELECT FROM information_schema.tables
+                    WHERE table_schema = 'public'
+                    AND table_name = 'query_history'
+                )
+            """))
+        else:
+            result = conn.execute(text("""
+                SELECT name FROM sqlite_master
+                WHERE type='table' AND name='query_history'
+            """))
 
-        if result.fetchone():
+        if result.fetchone()[0]:
             logger.info("✓ query_history table already exists")
             return
 
         # Create query_history table
         logger.info("Creating query_history table...")
 
-        conn.execute(text("""
-            CREATE TABLE query_history (
-                id TEXT PRIMARY KEY,
-                query_text TEXT NOT NULL,
-                query_source TEXT NOT NULL,
-                document_ids TEXT NOT NULL,
-                answer TEXT NOT NULL,
-                created_at TIMESTAMP NOT NULL,
-                expires_at TIMESTAMP
-            )
-        """))
+        if settings.DATABASE_URL.startswith("postgresql"):
+            conn.execute(text("""
+                CREATE TABLE query_history (
+                    id VARCHAR PRIMARY KEY,
+                    query_text TEXT NOT NULL,
+                    query_source VARCHAR NOT NULL,
+                    document_ids JSONB NOT NULL,
+                    answer TEXT NOT NULL,
+                    created_at TIMESTAMP NOT NULL,
+                    expires_at TIMESTAMP
+                )
+            """))
+        else:
+            conn.execute(text("""
+                CREATE TABLE query_history (
+                    id TEXT PRIMARY KEY,
+                    query_text TEXT NOT NULL,
+                    query_source TEXT NOT NULL,
+                    document_ids TEXT NOT NULL,
+                    answer TEXT NOT NULL,
+                    created_at TIMESTAMP NOT NULL,
+                    expires_at TIMESTAMP
+                )
+            """))
 
         # Create indexes for performance
         conn.execute(text("""

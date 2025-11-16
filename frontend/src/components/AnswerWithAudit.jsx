@@ -131,11 +131,6 @@ export default function AnswerWithAudit({
     }
   };
 
-  // Calculate queue position
-  const queuePosition = auditItems.length > 0
-    ? `${currentFieldIndex + 1} of ${auditItems.length}`
-    : null;
-
   // Backward compatibility - if no audit data, show simple answer
   if (!auditItems || auditItems.length === 0) {
     return (
@@ -144,6 +139,11 @@ export default function AnswerWithAudit({
       </div>
     );
   }
+
+  // Calculate queue position (now safe since we checked auditItems exists)
+  const queuePosition = auditItems.length > 0
+    ? `${currentFieldIndex + 1} of ${auditItems.length}`
+    : null;
 
   // Group audit items by document
   const groupedItems = groupAuditItemsByDocument(auditItems);
