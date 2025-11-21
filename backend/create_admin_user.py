@@ -23,12 +23,16 @@ def create_admin():
 
         # Create new admin user
         admin = User(
+            org_id=1,  # Default organization
             email="admin@paperbase.dev",
             name="Admin User",
             hashed_password=hash_password("admin"),
+            auth_provider="password",
+            organization_role="owner",
             is_admin=True,
             is_active=True,
-            email_verified=True
+            email_verified=True,
+            onboarding_completed=True
         )
 
         db.add(admin)

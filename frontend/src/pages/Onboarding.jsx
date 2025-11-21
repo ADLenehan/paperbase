@@ -53,7 +53,7 @@ function Onboarding() {
 
   const handleConfirm = async (confirmedSchema) => {
     console.log('Schema confirmed:', confirmedSchema)
-    navigate('/documents')
+    navigate('/app/documents')
   }
 
   const handleSchemaUpdate = (updatedSchema) => {

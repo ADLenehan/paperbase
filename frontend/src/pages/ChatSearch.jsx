@@ -441,7 +441,7 @@ function Message({ message, messageIndex, onViewExtraction, onFieldVerified, onB
     return (
       <div className="flex justify-end">
         <div className="max-w-2xl bg-blue-600 text-white rounded-lg px-4 py-3">
-          <p>{message.content}</p>
+          <p className="text-white">{message.content}</p>
         </div>
       </div>
     );

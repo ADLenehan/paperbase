@@ -9,6 +9,8 @@ from app.api import (
     audit,
     auth,
     bulk_upload,
+    canonical_fields,
+    comparisons,
     documents,
     export,
     extractions,
@@ -84,6 +86,8 @@ app.include_router(audit.router)  # HITL audit interface
 app.include_router(files.router)  # File serving for PDF preview
 app.include_router(export.router)  # Export functionality (CSV, Excel, JSON)
 app.include_router(aggregations.router)  # Comprehensive aggregations API
+app.include_router(canonical_fields.router)  # Canonical field mappings for cross-template aggregations
+app.include_router(comparisons.router)  # Period-over-period and group comparisons
 app.include_router(mcp_search.router)  # MCP server search interface
 app.include_router(query_suggestions.router)  # Smart query suggestions
 app.include_router(onboarding.router)
@@ -97,16 +101,31 @@ app.include_router(analytics.router)
 @app.on_event("startup")
 async def startup_event():
     logger.info("Creating database tables...")
-    Base.metadata.create_all(bind=engine)
-    logger.info("Database tables created successfully")
+
+    # Check if using PostgreSQL or SQLite
+    from app.core.config import settings
+    is_postgres = "postgresql" in settings.DATABASE_URL.lower()
+
+    if is_postgres:
+        Base.metadata.create_all(bind=engine)
+        logger.info("Database tables created successfully (PostgreSQL)")
+    else:
+        # For SQLite, exclude PostgreSQL-specific tables
+        tables_to_create = [table for table in Base.metadata.sorted_tables
+                          if table.name not in ['document_search_index', 'template_signatures']]
+        Base.metadata.create_all(bind=engine, tables=tables_to_create)
+        logger.info("Database tables created successfully (SQLite - excluded PostgreSQL tables)")
 
     from app.services.postgres_service import PostgresService
     from app.core.database import SessionLocal
 
     try:
-        db = SessionLocal()
-        postgres_service = PostgresService(db)
-        logger.info("PostgreSQL template signatures table ready")
+        if is_postgres:
+            db = SessionLocal()
+            postgres_service = PostgresService(db)
+            logger.info("PostgreSQL template signatures table ready")
+        else:
+            logger.info("Skipping PostgreSQL services (using SQLite)")
         db.close()
     except Exception as e:
         logger.error(f"Error verifying PostgreSQL setup: {e}")

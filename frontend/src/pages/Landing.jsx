@@ -42,6 +42,7 @@ const Landing = () => {
                 <button
                   onClick={() => window.location.href = '/login'}
                   className="inline-flex items-center justify-center font-medium transition-all duration-200 rounded-full focus:outline-none focus:ring-2 focus:ring-offset-2 ring-offset-background shadow-sm hover:shadow-md bg-coral-500 text-white hover:bg-coral-600 focus:ring-coral-500 px-4 py-2 text-sm"
+                  style={{ fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif' }}
                 >
                   Try 10 Docs Free
                 </button>
@@ -58,49 +59,40 @@ const Landing = () => {
         </nav>
 
         {/* Hero Section */}
-        <section className="py-20 md:py-28 bg-white">
+        <section className="pt-40 pb-12 md:pt-52 md:pb-16 bg-white">
           <div className="container-max section-padding">
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-12 items-center max-w-7xl mx-auto">
               {/* Left: Text Content */}
               <div>
                 <h1 className="font-display text-display-md md:text-display-lg mb-6">
-                  Extract Data from Documents with 100% Accuracy
+                  Frictionless, Precise Document Intelligence
                 </h1>
                 <p className="text-xl md:text-2xl text-muted-foreground mb-8" style={{ fontWeight: 300, fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif' }}>
-                  AI-powered extraction meets human validation. Process 100 documents in minutes with perfect accuracy.
+                  AI-powered extraction where possible meets human validation where needed. Available via Model Context Protocol (MCP) for access to thousands of documents.
                 </p>
                 <div className="flex flex-col sm:flex-row gap-4 mb-8">
                   <Link
                     to="/login"
-                    className="inline-flex items-center justify-center font-medium transition-all duration-200 rounded-full focus:outline-none focus:ring-2 focus:ring-offset-2 ring-offset-background shadow-sm hover:shadow-md px-8 py-3.5 text-lg relative bg-gradient-to-r from-coral-500 to-orange-400 text-white hover:from-coral-600 hover:to-orange-500 shadow-lg hover:shadow-xl"
+                    className="inline-flex items-center justify-center font-medium transition-all duration-200 rounded-full focus:outline-none focus:ring-2 focus:ring-offset-2 ring-offset-background shadow-sm hover:shadow-md px-8 py-4 text-xl bg-[#4A90E2] text-white hover:bg-[#357ABD] shadow-lg hover:shadow-xl"
+                    style={{ fontFamily: 'Arial, sans-serif' }}
                   >
-                    <span className="absolute -z-10 inset-0 rounded-full shadow-[0_0_0_10px_rgba(233,117,99,0.18)] pointer-events-none" aria-hidden="true"></span>
-                    <svg className="mr-2 h-5 w-5 md:h-6 md:w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
-                    </svg>
-                    Start Free Trial
+                    Upload 10 Docs Free
                   </Link>
                 </div>
                 {/* Trust signals with colored badges */}
                 <div className="flex flex-wrap gap-3">
-                  <span className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-coral-50 border border-coral-200">
-                    <svg className="w-4 h-4 text-coral-600" fill="currentColor" viewBox="0 0 20 20">
-                      <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
-                    </svg>
-                    <span className="text-sm font-medium text-coral-700">Try 10 Documents Free</span>
+                  <span className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-coral-50 border border-coral-200" style={{ fontFamily: 'Arial, sans-serif' }}>
+                    <span className="text-sm font-medium text-coral-600">Try 10 Documents Free</span>
                   </span>
-                  <span className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-coral-50 border border-coral-200">
-                    <svg className="w-4 h-4 text-coral-600" fill="currentColor" viewBox="0 0 20 20">
-                      <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
-                    </svg>
-                    <span className="text-sm font-medium text-coral-700">100% Accuracy Guaranteed</span>
+                  <span className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-coral-50 border border-coral-200" style={{ fontFamily: 'Arial, sans-serif' }}>
+                    <span className="text-sm font-medium text-coral-600">100% Accuracy Guaranteed</span>
                   </span>
                 </div>
               </div>
 
               {/* Right: Hero Image */}
-              <div>
-                <div className="rounded-2xl overflow-hidden">
+              <div className="flex justify-center">
+                <div className="rounded-2xl overflow-hidden" style={{ transform: 'scale(1.2)' }}>
                   <img
                     src="/images/Gemini_Generated_Image_c5sqfkc5sqfkc5sq.png"
                     alt="Document processing workflow"
@@ -113,10 +105,10 @@ const Landing = () => {
         </section>
 
         {/* Problem Gallery */}
-        <section className="py-20 md:py-28 bg-white">
+        <section className="py-12 md:py-24 bg-white">
           <div className="container-max section-padding">
             <div className="max-w-6xl mx-auto">
-              <h2 className="text-center mb-4">The Data Extraction Challenge</h2>
+              <h2 className="font-display text-center mb-4 text-4xl md:text-5xl" style={{ fontWeight: 300 }}>The Data Extraction Challenge</h2>
               <p className="text-center text-muted-foreground mb-12 text-lg md:text-xl" style={{ fontWeight: 300, fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif' }}>
                 Traditional approaches to extracting structured data from documents fall short
               </p>
@@ -124,25 +116,7 @@ const Landing = () => {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-12 max-w-6xl mx-auto">
                 {/* Problem 1: Pure AI */}
                 <div className="relative">
-                  <h3 className="font-display text-3xl md:text-4xl mb-6" style={{ fontWeight: 300 }}>Pure AI Not Precise Enough for Most Industries</h3>
-                  <div className="aspect-[4/3] rounded-xl overflow-hidden mb-6">
-                    <img
-                      src="/images/Gemini_Generated_Image_4eb3a34eb3a34eb3.png"
-                      alt="Filing cabinet chaos"
-                      className="w-full h-full object-cover"
-                    />
-                  </div>
-                  <p className="text-muted-foreground text-lg mb-4" style={{ fontWeight: 300, fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif' }}>
-                    OCR and AI tools achieve 85-95% accuracy - insufficient for regulated industries requiring 100% precision
-                  </p>
-                  <span className="inline-block px-4 py-2 rounded-full bg-coral-50 border border-coral-200 text-coral-700 text-sm font-medium">
-                    85-95% accuracy isn't enough
-                  </span>
-                </div>
-
-                {/* Problem 2: Manual Entry */}
-                <div className="relative">
-                  <h3 className="font-display text-3xl md:text-4xl mb-6" style={{ fontWeight: 300 }}>Manual Entry is Costly and Error-Prone</h3>
+                  <h3 className="font-display text-2xl md:text-3xl mb-6" style={{ fontWeight: 300 }}>Pure AI Not Precise Enough for Most Industries</h3>
                   <div className="aspect-[4/3] rounded-xl overflow-hidden mb-6">
                     <img
                       src="/images/Gemini_Generated_Image_eeth86eeth86eeth.png"
@@ -151,9 +125,27 @@ const Landing = () => {
                     />
                   </div>
                   <p className="text-muted-foreground text-lg mb-4" style={{ fontWeight: 300, fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif' }}>
+                    OCR and AI tools achieve 85-95% accuracy - insufficient for regulated industries requiring 100% precision
+                  </p>
+                  <span className="inline-block px-4 py-2 rounded-full bg-coral-50 border border-coral-200 text-coral-600 text-sm" style={{ fontFamily: 'Arial, sans-serif' }}>
+                    85-95% accuracy isn't enough
+                  </span>
+                </div>
+
+                {/* Problem 2: Manual Entry */}
+                <div className="relative">
+                  <h3 className="font-display text-2xl md:text-3xl mb-6" style={{ fontWeight: 300 }}>Manual Entry is Costly and Error-Prone</h3>
+                  <div className="aspect-[4/3] rounded-xl overflow-hidden mb-6">
+                    <img
+                      src="/images/Gemini_Generated_Image_4eb3a34eb3a34eb3.png"
+                      alt="Filing cabinet chaos"
+                      className="w-full h-full object-cover"
+                    />
+                  </div>
+                  <p className="text-muted-foreground text-lg mb-4" style={{ fontWeight: 300, fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif' }}>
                     Human data entry is slow, expensive, and still makes mistakes. Teams spend 20+ hours/week on repetitive typing.
                   </p>
-                  <span className="inline-block px-4 py-2 rounded-full bg-coral-50 border border-coral-200 text-coral-700 text-sm font-medium">
+                  <span className="inline-block px-4 py-2 rounded-full bg-coral-50 border border-coral-200 text-coral-600 text-sm" style={{ fontFamily: 'Arial, sans-serif' }}>
                     20+ hrs/week wasted
                   </span>
                 </div>
@@ -163,10 +155,10 @@ const Landing = () => {
         </section>
 
         {/* How It Works - Merged with See It In Action */}
-        <section id="how-it-works" className="py-20 md:py-28 bg-white">
+        <section id="how-it-works" className="py-12 md:py-24 bg-white">
           <div className="container-max section-padding">
             <div className="max-w-6xl mx-auto">
-              <h2 className="text-center mb-4">How It Works</h2>
+              <h2 className="font-display text-center mb-4 text-4xl md:text-5xl" style={{ fontWeight: 300 }}>How It Works</h2>
               <p className="text-center text-muted-foreground mb-12 text-lg md:text-xl" style={{ fontWeight: 300, fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif' }}>
                 AI handles the speed, you ensure the accuracy
               </p>
@@ -214,7 +206,7 @@ const Landing = () => {
                   </div>
                   <h3 className="font-semibold text-lg mb-3">Human Audit</h3>
                   <p className="text-muted-foreground text-sm">
-                    Low-confidence fields flagged for review. Verify in &lt;10s with inline PDF viewer. 100% accuracy.
+                    See real-time confidence scores for every field. Understand exactly which extractions need review. Verify in &lt;10s with inline PDF viewer.
                   </p>
                 </div>
 
@@ -229,19 +221,8 @@ const Landing = () => {
                   </div>
                   <h3 className="font-semibold text-lg mb-3">Search & Export</h3>
                   <p className="text-muted-foreground text-sm">
-                    Ask questions in plain English. Elasticsearch powers instant search across all extracted data.
+                    Ask questions in plain English or query via MCP. Elasticsearch powers instant search across all extracted data.
                   </p>
-                </div>
-              </div>
-
-              {/* Demo Image */}
-              <div className="mt-16 mb-20 max-w-4xl mx-auto">
-                <div className="rounded-2xl overflow-hidden">
-                  <img
-                    src="/images/Gemini_Generated_Image_p68et1p68et1p68e.png"
-                    alt="Workflow automation demo"
-                    className="w-full h-auto"
-                  />
                 </div>
               </div>
 
@@ -250,7 +231,7 @@ const Landing = () => {
                 {/* Capability 1: Bulk Upload */}
                 <div className="grid lg:grid-cols-2 gap-8 items-center">
                   <div>
-                    <div className="inline-block px-3 py-1 rounded-full bg-coral-50 border border-coral-200 text-coral-700 text-xs font-medium mb-4">
+                    <div className="inline-block px-3 py-1 rounded-full bg-coral-50 border border-coral-200 text-coral-600 text-xs font-medium mb-4" style={{ fontFamily: 'Arial, sans-serif' }}>
                       Template Matching
                     </div>
                     <h3 className="text-2xl font-semibold mb-4">Upload 100 Documents, AI Matches Templates</h3>
@@ -283,25 +264,25 @@ const Landing = () => {
                     <span className="text-gray-400 text-lg font-medium">Product Screenshot: Inline Audit Modal</span>
                   </div>
                   <div className="lg:order-2">
-                    <div className="inline-block px-3 py-1 rounded-full bg-yellow-50 border border-yellow-200 text-yellow-700 text-xs font-medium mb-4">
+                    <div className="inline-block px-3 py-1 rounded-full bg-yellow-50 border border-yellow-200 text-yellow-700 text-xs font-medium mb-4" style={{ fontFamily: 'Arial, sans-serif' }}>
                       Human-in-the-Loop
                     </div>
                     <h3 className="text-2xl font-semibold mb-4">Verify Low-Confidence Fields in Seconds</h3>
                     <p className="text-muted-foreground text-lg mb-6">
-                      AI flags uncertain extractions for quick human review. Click a field, see the PDF source highlighted, verify in &lt;10 seconds. This is how you achieve 100% accuracy without manual data entry.
+                      See real-time confidence scores for every extracted field - understand exactly which data the AI is certain about and which needs your review. Click a field, see the PDF source highlighted, verify in &lt;10 seconds. This transparency is the key to achieving 100% accuracy without manual data entry.
                     </p>
                     <ul className="space-y-3">
+                      <li className="flex items-start gap-3">
+                        <span className="text-coral-500 text-xl font-bold">✓</span>
+                        <span className="text-muted-foreground">Real-time confidence tracking: see AI certainty for every field</span>
+                      </li>
                       <li className="flex items-start gap-3">
                         <span className="text-coral-500 text-xl font-bold">✓</span>
                         <span className="text-muted-foreground">Inline PDF viewer: see exact source of extracted data</span>
                       </li>
                       <li className="flex items-start gap-3">
                         <span className="text-coral-500 text-xl font-bold">✓</span>
-                        <span className="text-muted-foreground">Confidence scores: AI tells you which fields need review</span>
-                      </li>
-                      <li className="flex items-start gap-3">
-                        <span className="text-coral-500 text-xl font-bold">✓</span>
-                        <span className="text-muted-foreground">10-second validation: 3x faster than previous workflow</span>
+                        <span className="text-muted-foreground">10-second validation: 3x faster with full transparency</span>
                       </li>
                     </ul>
                   </div>
@@ -310,12 +291,12 @@ const Landing = () => {
                 {/* Capability 3: Natural Language Search */}
                 <div className="grid lg:grid-cols-2 gap-8 items-center">
                   <div>
-                    <div className="inline-block px-3 py-1 rounded-full bg-sky-50 border border-sky-200 text-sky-700 text-xs font-medium mb-4">
+                    <div className="inline-block px-3 py-1 rounded-full bg-blue-50 border border-blue-200 text-blue-700 text-xs font-medium mb-4" style={{ fontFamily: 'Arial, sans-serif' }}>
                       Powered by Elasticsearch
                     </div>
-                    <h3 className="text-2xl font-semibold mb-4">Ask Questions, Get Instant Answers</h3>
+                    <h3 className="text-2xl font-semibold mb-4">Ask Questions, Get Instant Answers - Available via MCP</h3>
                     <p className="text-muted-foreground text-lg mb-6">
-                      Forget complex queries. Ask "Show me invoices over $1000 from last quarter" and get instant results. Claude translates your question into Elasticsearch queries, searching across all extracted data.
+                      Forget complex queries. Ask "Show me invoices over $1000 from last quarter" and get instant results. Claude translates your question into Elasticsearch queries, searching across all extracted data. Available as an MCP server - integrate directly with Claude Desktop, VS Code, and other AI tools.
                     </p>
                     <ul className="space-y-3">
                       <li className="flex items-start gap-3">
@@ -324,11 +305,11 @@ const Landing = () => {
                       </li>
                       <li className="flex items-start gap-3">
                         <span className="text-coral-500 text-xl font-bold">✓</span>
-                        <span className="text-muted-foreground">Instant search: Elasticsearch powers sub-200ms queries</span>
+                        <span className="text-muted-foreground">MCP integration: query from Claude Desktop or other AI tools</span>
                       </li>
                       <li className="flex items-start gap-3">
                         <span className="text-coral-500 text-xl font-bold">✓</span>
-                        <span className="text-muted-foreground">Complex filters: search across multiple fields and dates</span>
+                        <span className="text-muted-foreground">Instant search: Elasticsearch powers sub-200ms queries</span>
                       </li>
                     </ul>
                   </div>
@@ -342,10 +323,10 @@ const Landing = () => {
         </section>
 
         {/* Final CTA */}
-        <section className="py-28 md:py-36 bg-white">
+        <section className="py-12 md:py-24 bg-white">
           <div className="container-max section-padding">
             <div className="max-w-4xl mx-auto text-center">
-              <h2 className="font-display text-3xl md:text-4xl mb-8 text-center">
+              <h2 className="font-display text-center mb-8 text-4xl md:text-5xl" style={{ fontWeight: 300 }}>
                 Try 10 Documents Free
               </h2>
               <p className="text-lg md:text-xl text-muted-foreground mb-8" style={{ fontWeight: 300, fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif' }}>
@@ -354,13 +335,10 @@ const Landing = () => {
               <div className="flex justify-center mb-12">
                 <Link
                   to="/login"
-                  className="inline-flex items-center justify-center font-medium transition-all duration-200 rounded-full focus:outline-none focus:ring-2 focus:ring-offset-2 ring-offset-background shadow-sm hover:shadow-md px-8 py-3.5 text-lg relative bg-gradient-to-r from-sky-500 to-sky-400 text-white hover:from-sky-600 hover:to-sky-500 shadow-lg hover:shadow-xl h-16"
+                  className="inline-flex items-center justify-center font-medium transition-all duration-200 rounded-full focus:outline-none focus:ring-2 focus:ring-offset-2 ring-offset-background shadow-sm hover:shadow-md px-8 py-4 text-xl bg-[#4A90E2] text-white hover:bg-[#357ABD] shadow-lg hover:shadow-xl"
+                  style={{ fontFamily: 'Arial, sans-serif' }}
                 >
-                  <span className="absolute -z-10 inset-0 rounded-full shadow-[0_0_0_10px_rgba(56,189,248,0.18)] pointer-events-none" aria-hidden="true"></span>
-                  <svg className="mr-2 h-5 w-5 md:h-6 md:w-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
-                  </svg>
-                  Start Free Trial
+                  Upload 10 Docs Free
                 </Link>
               </div>
               <p className="text-base text-muted-foreground mt-6 px-4">
@@ -371,9 +349,9 @@ const Landing = () => {
         </section>
 
         {/* Hero Image Section - Before Footer */}
-        <section className="py-0 bg-white">
+        <section className="py-12 md:py-24 bg-white">
           <div className="container-max section-padding">
-            <div className="max-w-7xl mx-auto">
+            <div className="max-w-4xl mx-auto">
               <div className="lg:w-1/2 mx-auto">
                 <img
                   src="/images/Gemini_Generated_Image_do3nuddo3nuddo3n.png"
@@ -387,7 +365,7 @@ const Landing = () => {
 
         {/* Footer */}
         <footer className="border-t border-border bg-white">
-          <div className="container-max section-padding py-16 md:py-20">
+          <div className="container-max section-padding py-12 md:py-20">
             <div className="grid grid-cols-2 md:grid-cols-4 gap-8 mb-12">
               <div className="col-span-2 md:col-span-1">
                 <Link to="/" className="inline-flex">
@@ -425,7 +403,7 @@ const Landing = () => {
             <div className="pt-8 border-t border-border">
               <div className="flex flex-col md:flex-row justify-between items-center space-y-4 md:space-y-0">
                 <p className="text-sm text-muted-foreground">
-                  © 2024 PaperBase. Built with Claude Code.
+                  © 2025 by <a href="https://inroad.co" target="_blank" rel="noopener noreferrer" className="hover:text-foreground transition-colors">Inroad</a>
                 </p>
               </div>
             </div>

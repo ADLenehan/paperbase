@@ -85,7 +85,7 @@ export default function BulkUpload() {
 
     if (allProcessed && allCompleted) {
       console.log('All groups processed and completed! Navigating to documents...');
-      setTimeout(() => navigate('/documents'), 1500);
+      setTimeout(() => navigate('/app/documents'), 1500);
     }
   }, [documentGroups, completedGroups, navigate]);
 
@@ -281,13 +281,13 @@ export default function BulkUpload() {
         // Partial failure
         setError(`Processed ${successes.length}/${documentGroups.length} groups successfully. Failed: ${errors.map(e => `"${e.group}" (${e.error})`).join(', ')}`);
         // Still navigate to see successful ones
-        setTimeout(() => navigate('/documents'), 2000);
+        setTimeout(() => navigate('/app/documents'), 2000);
       } else if (errors.length > 0) {
         // Complete failure
         setError(`Failed to process all groups: ${errors.map(e => `"${e.group}" (${e.error})`).join(', ')}`);
       } else {
         // Complete success - navigate immediately
-        setTimeout(() => navigate('/documents'), 1000);
+        setTimeout(() => navigate('/app/documents'), 1000);
       }
     } finally {
       setProcessing(false);
@@ -729,7 +729,7 @@ export default function BulkUpload() {
         onClose={() => setShowProcessingModal(false)}
         onComplete={() => {
           setShowProcessingModal(false);
-          navigate('/documents');
+          navigate('/app/documents');
         }}
       />
 
@@ -1012,7 +1012,7 @@ function DocumentGroupRow({ group, groupIndex, availableTemplates, isExtracting,
             {/* Show "View in Documents" link if extraction is complete */}
             {isCompleted ? (
               <button
-                onClick={() => navigate('/documents')}
+                onClick={() => navigate('/app/documents')}
                 className="px-4 py-2 bg-periwinkle-500 text-white rounded-lg text-sm font-medium hover:bg-periwinkle-600 transition-colors inline-flex items-center justify-center gap-2"
               >
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">

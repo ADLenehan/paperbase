@@ -38,7 +38,7 @@ export const AuthProvider = ({ children }) => {
       const isDevModeActive = checkDevMode();
 
       if (storedToken && storedUser) {
-        setToken(storedToken);
+        setTokenState(storedToken);
         setUser(storedUser);
         setDevMode(isDevModeActive);
       }
@@ -65,7 +65,7 @@ export const AuthProvider = ({ children }) => {
       storeToken(access_token);
       storeUser(userData);
 
-      setToken(access_token);
+      setTokenState(access_token);
       setUser(userData);
       setDevMode(false);
       disableDevMode();
@@ -81,11 +81,34 @@ export const AuthProvider = ({ children }) => {
   };
 
   /**
+   * Sign up with email, password, and name
+   */
+  const signup = async ({ email, password, name }) => {
+    try {
+      const response = await apiClient.post('/api/users/', {
+        email,
+        password,
+        name,
+        is_active: true
+      });
+
+      // After successful signup, log the user in
+      return await login(email, password);
+    } catch (error) {
+      console.error('Signup failed:', error);
+      return {
+        success: false,
+        error: error.response?.data?.detail || 'Signup failed. Please try again.'
+      };
+    }
+  };
+
+  /**
    * Logout
    */
   const logout = () => {
     clearAuth();
-    setToken(null);
+    setTokenState(null);
     setUser(null);
     setDevMode(false);
     navigate('/login');
@@ -103,7 +126,7 @@ export const AuthProvider = ({ children }) => {
     enableDevMode();
 
     setUser(adminUser);
-    setToken('dev-bypass-token');
+    setTokenState('dev-bypass-token');
     setDevMode(true);
 
     return { success: true };
@@ -146,6 +169,7 @@ export const AuthProvider = ({ children }) => {
     devMode,
     isAuthenticated: !!(user && token),
     login,
+    signup,
     logout,
     devBypass,
     exitDevMode,

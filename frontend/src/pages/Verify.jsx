@@ -124,7 +124,7 @@ function Verify() {
           <p className="mt-2 text-gray-600">You've reviewed {queue.length} items</p>
           <div className="mt-4 flex gap-3 justify-center">
             <button
-              onClick={() => navigate('/documents')}
+              onClick={() => navigate('/app/documents')}
               className="bg-blue-600 text-white px-6 py-2 rounded-lg font-medium hover:bg-blue-700"
             >
               Back to Documents
@@ -151,7 +151,7 @@ function Verify() {
           <div className="flex items-center gap-3">
             {documentId && (
               <button
-                onClick={() => navigate('/documents')}
+                onClick={() => navigate('/app/documents')}
                 className="text-gray-600 hover:text-gray-900"
               >
                 ← Back

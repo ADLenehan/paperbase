@@ -1,8 +1,10 @@
-import { Routes, Route } from 'react-router-dom'
+import { Routes, Route, Navigate, useParams } from 'react-router-dom'
 import { AuthProvider } from './contexts/AuthContext'
 import ProtectedRoute from './components/ProtectedRoute'
 import DevModeBanner from './components/DevModeBanner'
+import Landing from './pages/Landing'
 import Login from './pages/Login'
+import SignUp from './pages/SignUp'
 import Layout from './components/Layout'
 import BulkUpload from './pages/BulkUpload'
 import BulkConfirmation from './pages/BulkConfirmation'
@@ -14,17 +16,43 @@ import Audit from './pages/Audit'
 import SchemaEditor from './pages/SchemaEditor'
 import Settings from './pages/Settings'
 
+// Redirect component for legacy verify URLs
+function VerifyRedirect() {
+  const { documentId } = useParams()
+  return <Navigate to={`/app/audit/document/${documentId}`} replace />
+}
+
+// Redirect component for legacy documents URLs
+function DocumentRedirect() {
+  const { documentId } = useParams()
+  return <Navigate to={`/app/documents/${documentId}`} replace />
+}
+
 function App() {
   return (
     <AuthProvider>
       <DevModeBanner />
       <Routes>
         {/* Public routes */}
+        <Route path="/" element={<Landing />} />
         <Route path="/login" element={<Login />} />
+        <Route path="/signup" element={<SignUp />} />
+
+        {/* Legacy redirects - old URLs to new app-prefixed URLs */}
+        <Route
+          path="/verify/:documentId"
+          element={<VerifyRedirect />}
+        />
+        <Route path="/verify" element={<Navigate to="/app/audit" replace />} />
+        <Route
+          path="/documents/:documentId"
+          element={<DocumentRedirect />}
+        />
+        <Route path="/documents" element={<Navigate to="/app/documents" replace />} />
 
         {/* Protected routes */}
         <Route
-          path="/"
+          path="/app"
           element={
             <ProtectedRoute>
               <Layout />

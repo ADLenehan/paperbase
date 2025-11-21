@@ -121,8 +121,8 @@ async def analyze_samples(
             logger.info(f"Created new schema: {schema_name}")
             schema_id = new_schema.id
 
-        # Step 5: Create Elasticsearch index
-        await elastic_service.create_index(schema_data)
+        # Step 5: Index creation (PostgreSQL tables created via migrations)
+        logger.info(f"Schema index ready for: {schema_data.get('name')}")
 
         # Generate Reducto config for future extractions
         reducto_config = await claude_service.generate_reducto_config(schema_data)
@@ -219,16 +219,13 @@ async def create_schema(
     db.commit()
     db.refresh(new_schema)
 
-    # Create Elasticsearch index
-    try:
-        postgres_service = PostgresService(db)
-        await elastic_service.create_index({
-            "name": new_schema.name,
-            "fields": new_schema.fields
-        })
-        logger.info(f"Created Elasticsearch index for schema {new_schema.id}")
-    except Exception as e:
-        logger.warning(f"Failed to create Elasticsearch index: {e}")
+    # Index creation (PostgreSQL tables created via migrations)
+    postgres_service = PostgresService(db)
+    await postgres_service.create_index({
+        "name": new_schema.name,
+        "fields": new_schema.fields
+    })
+    logger.info(f"Schema index ready for {new_schema.id}")
 
     return {
         "success": True,
@@ -295,15 +292,13 @@ async def update_schema(
     db.commit()
 
     # Update Elasticsearch mapping (optional - may not be running in dev)
-    try:
-        postgres_service = PostgresService(db)
-        await elastic_service.create_index({
-            "name": schema.name,
-            "fields": schema.fields
-        })
-        logger.info(f"Updated Elasticsearch index for schema {schema_id}")
-    except Exception as e:
-        logger.warning(f"Failed to update Elasticsearch index: {e}. Continuing without search functionality.")
+    # Index creation (PostgreSQL tables created via migrations)
+    postgres_service = PostgresService(db)
+    await postgres_service.create_index({
+        "name": schema.name,
+        "fields": schema.fields
+    })
+    logger.info(f"Schema index ready for {schema_id}")
 
     return {
         "success": True,
@@ -611,19 +606,15 @@ async def add_field_and_extract(
 
     logger.info(f"Added field '{field_config['name']}' to schema {schema_id}")
 
-    # Update Elasticsearch mapping
-    try:
-        postgres_service = PostgresService(db)
-        # For now, we'll recreate the index with the new field
-        # In future, could use _mapping API to add field dynamically
-        await elastic_service.create_index({
-            "name": schema.name,
-            "fields": schema.fields
-        })
-        logger.info(f"Updated Elasticsearch mapping for schema {schema_id}")
-    except Exception as e:
-        logger.warning(f"Failed to update Elasticsearch mapping: {e}")
-        # Don't fail the request if ES update fails
+    # Index creation (PostgreSQL tables created via migrations)
+    postgres_service = PostgresService(db)
+    # For now, this is a no-op since PostgreSQL tables are created via migrations
+    # In future, could add dynamic field indexing if needed
+    await postgres_service.create_index({
+        "name": schema.name,
+        "fields": schema.fields
+    })
+    logger.info(f"Schema index ready for {schema_id}")
 
     # Extract from existing docs if requested
     job_id = None

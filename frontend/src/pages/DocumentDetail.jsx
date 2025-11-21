@@ -358,7 +358,7 @@ export default function DocumentDetail() {
               <h3 className="text-sm font-medium text-primary-800">Error loading document</h3>
               <p className="mt-2 text-sm text-primary-700">{error}</p>
               <button
-                onClick={() => navigate('/documents')}
+                onClick={() => navigate('/app/documents')}
                 className="mt-3 text-sm font-medium text-primary-700 hover:text-primary-800 underline"
               >
                 ← Back to documents
@@ -375,7 +375,7 @@ export default function DocumentDetail() {
       <div className="max-w-2xl mx-auto mt-12 p-6">
         <p className="text-gray-600">Document not found</p>
         <button
-          onClick={() => navigate('/documents')}
+          onClick={() => navigate('/app/documents')}
           className="mt-3 text-sm font-medium text-periwinkle-600 hover:text-periwinkle-700 underline"
         >
           ← Back to documents
@@ -391,7 +391,7 @@ export default function DocumentDetail() {
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-4 flex-1 min-w-0">
             <button
-              onClick={() => navigate('/documents')}
+              onClick={() => navigate('/app/documents')}
               className="text-gray-400 hover:text-gray-600 transition-colors"
             >
               <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">

@@ -69,8 +69,12 @@ class SchemaRegistry:
             field_name = field_def.get("name")
             field_type = field_def.get("type", "text")
 
-            # Generate semantic aliases for common field names
-            aliases = self._generate_aliases(field_name, field_type)
+            # ✨ NEW: Prefer schema-provided aliases over auto-generated ones
+            search_meta = field_def.get("search_metadata", {})
+            schema_aliases = search_meta.get("aliases", [])
+
+            # Fall back to auto-generation if not provided in schema
+            aliases = schema_aliases if schema_aliases else self._generate_aliases(field_name, field_type)
 
             # Build comprehensive context
             field_contexts[field_name] = {
@@ -80,7 +84,9 @@ class SchemaRegistry:
                 "extraction_hints": field_def.get("extraction_hints", []),
                 "required": field_def.get("required", False),
                 "confidence_threshold": field_def.get("confidence_threshold", 0.75),
-                "typical_queries": self._generate_typical_queries(field_name, field_type)
+                "typical_queries": self._generate_typical_queries(field_name, field_type),
+                "search_metadata": search_meta,  # Pass through full search metadata
+                "aggregation_metadata": field_def.get("aggregation_metadata", {})  # Pass through aggregation metadata
             }
 
             all_field_names.append(field_name)

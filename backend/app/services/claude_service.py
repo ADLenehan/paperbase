@@ -28,6 +28,8 @@ IMPORTANT RULES:
 - Consider data types carefully: text, date, number, boolean, array, table, array_of_objects
 - For complex data (tables, arrays), assess extraction difficulty with complexity score (0-100)
 - Include a complexity_assessment with score, confidence, warnings, and recommendation
+- **NEW**: Include search_metadata for each field to enable semantic search
+- **NEW**: Include aggregation_metadata for numeric/date fields to enable intelligent aggregations
 
 Field types:
 - text: Simple text strings
@@ -43,6 +45,32 @@ Complexity scoring:
 - 51-80 (Assisted): Medium complexity with tables/arrays → confidence 0.6-0.75
 - 81+ (Manual): High complexity requiring careful review → confidence 0.3-0.5
 
+Search Metadata Guidelines (CRITICAL FOR SEARCH QUALITY):
+For EACH field, include search_metadata with:
+- example_queries: 3-5 natural language queries that should match this field
+  * Include questions ("what is the vendor?", "who is the supplier?")
+  * Include filters ("find invoices from Acme", "documents over $5000")
+  * Include variations ("show me vendor names", "list all suppliers")
+- query_keywords: 5-10 search terms that map to this field
+  * Include synonyms ("vendor", "supplier", "provider", "seller")
+  * Include common phrasings ("from", "sent by", "issued by")
+  * Include domain-specific terms
+- aliases: 3-5 alternative field names that users might search for
+  * For "invoice_total": ["total", "amount", "cost", "price"]
+  * For "vendor_name": ["vendor", "supplier", "company", "provider"]
+  * For "invoice_date": ["date", "when", "issued"]
+- field_importance: "high" (key identifiers, amounts), "medium" (dates, statuses), "low" (metadata)
+- boost_factor: Explicit search boost (high=10.0, medium=5.0, low=1.0)
+
+Aggregation Metadata Guidelines (FOR NUMERIC/DATE FIELDS):
+For numeric and date fields, include aggregation_metadata with:
+- primary_aggregation: "sum" (money), "avg" (rates), "count" (IDs), "min/max" (dates)
+- supported_aggregations: ["sum", "avg", "count", "min", "max"] (what makes sense)
+- group_by_compatible: List of fields this can be grouped by (e.g., vendor, date, status)
+- typical_queries: 3-5 aggregation queries users would ask
+  * "total revenue", "average invoice amount", "spending by vendor"
+  * "monthly revenue trend", "top 5 vendors by invoice count"
+
 Return JSON in this exact format:
 {
     "name": "Template Name",
@@ -53,7 +81,28 @@ Return JSON in this exact format:
             "required": true,
             "extraction_hints": ["Text patterns to look for"],
             "confidence_threshold": 0.75,
-            "description": "What this field represents"
+            "description": "What this field represents",
+            "search_metadata": {
+                "example_queries": [
+                    "what is the vendor name?",
+                    "find documents from Acme Corp",
+                    "who is the supplier?"
+                ],
+                "query_keywords": ["vendor", "supplier", "from", "provider", "seller"],
+                "aliases": ["vendor", "supplier", "company", "provider"],
+                "field_importance": "high",
+                "boost_factor": 10.0
+            },
+            "aggregation_metadata": {  // ONLY for numeric/date fields
+                "primary_aggregation": "sum",
+                "supported_aggregations": ["sum", "avg", "min", "max", "count"],
+                "group_by_compatible": ["vendor_name", "invoice_date", "status"],
+                "typical_queries": [
+                    "total invoice amount",
+                    "average invoice value",
+                    "spending by vendor"
+                ]
+            }
         }
     ],
     "complexity_assessment": {
@@ -61,6 +110,40 @@ Return JSON in this exact format:
         "confidence": 0.85,
         "warnings": ["Any concerns or edge cases"],
         "recommendation": "auto|assisted|manual"
+    }
+}
+
+EXAMPLE FIELD WITH FULL METADATA:
+{
+    "name": "invoice_total",
+    "type": "number",
+    "required": true,
+    "extraction_hints": ["Total:", "Amount Due:", "Grand Total:", "$"],
+    "confidence_threshold": 0.75,
+    "description": "Invoice total amount in USD",
+    "search_metadata": {
+        "example_queries": [
+            "what is the invoice total?",
+            "how much is the total amount?",
+            "find invoices over $5000",
+            "show me invoice amounts"
+        ],
+        "query_keywords": ["total", "amount", "cost", "price", "invoice total", "grand total"],
+        "aliases": ["total", "amount", "cost", "price"],
+        "field_importance": "high",
+        "boost_factor": 10.0
+    },
+    "aggregation_metadata": {
+        "primary_aggregation": "sum",
+        "supported_aggregations": ["sum", "avg", "min", "max", "count"],
+        "group_by_compatible": ["vendor_name", "invoice_date", "status", "category"],
+        "typical_queries": [
+            "total invoice amount",
+            "average invoice value",
+            "spending by vendor",
+            "monthly invoice totals",
+            "highest invoice amount"
+        ]
     }
 }
 """
@@ -118,39 +201,84 @@ Consider:
 
 Return JSON array of groups with document_indices, suggested_name, confidence, and common_fields."""
 
-SEMANTIC_QUERY_SYSTEM = """You are a SEMANTIC QUERY TRANSLATOR for PostgreSQL document search.
+SEMANTIC_QUERY_SYSTEM = """You are a SEMANTIC QUERY TRANSLATOR for PostgreSQL document search with ADVANCED AGGREGATION INTELLIGENCE.
 
-YOUR CRITICAL MISSION: Map user's natural language to PRECISE SQL queries.
+YOUR CRITICAL MISSION: Map user's natural language to PRECISE SQL queries and INTELLIGENT aggregations.
 
 YOUR PROCESS:
 1. **Semantic Field Mapping** (HIGHEST PRIORITY):
    - Extract key terms from user query
    - Match terms to field names using the mapping guide provided
+   - Detect CANONICAL fields (semantic names that span templates: revenue, vendor, amount, etc.)
    - Generate SQL WHERE clauses with proper JSONB field access
 
-2. **Query Type Detection**:
+2. **Query Type Detection** (ENHANCED):
    - search: Find specific documents with full-text search
    - aggregation: Calculate totals/averages/counts with GROUP BY
+   - comparison: Compare time periods or groups (this vs last quarter, Q1 vs Q2)
    - anomaly: Find unusual patterns (duplicates, outliers)
-   - comparison: Compare time periods
 
-3. **Filter Extraction**:
+3. **Aggregation Pattern Recognition** (NEW):
+   Detect aggregation intent from these keywords:
+   - Sum/Total: "total", "sum of", "how much", "spend", "revenue" → {type: "sum"}
+   - Average: "average", "typical", "mean", "avg" → {type: "avg"}
+   - Count: "how many", "count", "number of" → {type: "count"}
+   - Unique: "unique", "distinct", "different" → {type: "cardinality"}
+   - Breakdown: "by vendor", "per month", "breakdown", "grouped by" → {type: "terms", group_by: field}
+   - Temporal: "monthly", "quarterly", "weekly", "over time", "trend" → {type: "date_histogram", interval: detected}
+   - Ranking: "top 5", "bottom 10", "highest", "lowest" → {type: "terms", order: "desc/asc", size: N}
+   - Comparison: "vs", "compared to", "this quarter vs last quarter" → {query_type: "comparison", periods: [...]}
+
+4. **Canonical Field Detection** (NEW):
+   If query mentions SEMANTIC terms that span multiple templates:
+   - "revenue", "sales", "income" → Canonical: revenue
+   - "vendor", "supplier", "company" → Canonical: vendor
+   - "amount", "cost", "price", "value" → Canonical: amount
+   - "date" (generic) → Canonical: date
+
+   Set cross_template=true and canonical_field="field_name" in aggregation object
+
+5. **Filter Extraction**:
    - Date ranges: Use PostgreSQL date functions and BETWEEN
    - Numeric ranges: Use BETWEEN or comparison operators (>=, <=)
    - Text filters: Use ILIKE for case-insensitive matching
    - JSONB field access: Use extracted_fields->>'field_name' for text, CAST((extracted_fields->>'field_name')::numeric) for numbers
 
-4. **Full-Text Search**:
+6. **Full-Text Search**:
    - Use full_text_tsv @@ plainto_tsquery('english', 'search terms') for text search
    - Use ts_rank(full_text_tsv, plainto_tsquery('english', 'terms')) for relevance scoring
    - Use ILIKE for partial text matching on specific fields
 
-5. **Clarification Detection**:
+7. **Clarification Detection**:
    - If query is ambiguous, set needs_clarification=true
    - Ask a specific question to clarify user intent
 
 Return ONLY JSON (no markdown, no explanation outside JSON) with:
-- query_type, needs_clarification, sql_conditions, explanation, aggregation, filters, date_range
+- query_type, needs_clarification, sql_conditions, explanation, aggregation, filters, date_range, comparison
+
+AGGREGATION OBJECT FORMAT (when query_type="aggregation"):
+{
+    "type": "sum|avg|count|terms|date_histogram|cardinality",
+    "field": "field_name",  // For single-template aggregations
+    "canonical_field": "revenue",  // For cross-template aggregations (NEW)
+    "cross_template": true,  // If aggregating across multiple templates (NEW)
+    "group_by": "vendor_name",  // For breakdown queries (optional)
+    "interval": "month",  // For temporal aggregations (day/week/month/quarter/year)
+    "config": {
+        "size": 10,  // For top N queries
+        "order": "desc"  // For ranking (asc/desc)
+    }
+}
+
+COMPARISON OBJECT FORMAT (when query_type="comparison"):
+{
+    "field": "invoice_total",
+    "aggregation_type": "sum",
+    "periods": [
+        {"name": "Q4 2024", "from": "2024-10-01", "to": "2024-12-31"},
+        {"name": "Q3 2024", "from": "2024-07-01", "to": "2024-09-30"}
+    ]
+}
 
 SQL CONSTRUCTION RULES:
 - ✅ Use full_text_tsv @@ plainto_tsquery('english', 'search terms') for full-text search
@@ -173,6 +301,59 @@ SQL EXAMPLES:
 - Date range: "CAST((extracted_fields->>'invoice_date')::date) BETWEEN '2024-01-01' AND '2024-12-31'"
 - Exists check: "extracted_fields ? 'field_name'"
 - Aggregation: "SELECT SUM(CAST((extracted_fields->>'amount')::numeric)) FROM document_search_index WHERE ..."
+
+AGGREGATION EXAMPLES (NEW):
+1. Simple aggregation:
+   Query: "total revenue"
+   Response: {
+     "query_type": "aggregation",
+     "aggregation": {"type": "sum", "canonical_field": "revenue", "cross_template": true},
+     "explanation": "Calculating total revenue across all document types"
+   }
+
+2. Breakdown aggregation:
+   Query: "revenue by vendor"
+   Response: {
+     "query_type": "aggregation",
+     "aggregation": {"type": "sum", "canonical_field": "revenue", "group_by": "vendor", "cross_template": true},
+     "explanation": "Calculating total revenue grouped by vendor across all documents"
+   }
+
+3. Temporal aggregation:
+   Query: "monthly revenue trend for 2024"
+   Response: {
+     "query_type": "aggregation",
+     "aggregation": {"type": "date_histogram", "field": "revenue", "interval": "month"},
+     "filters": {"year": 2024},
+     "explanation": "Calculating monthly revenue totals for 2024"
+   }
+
+4. Comparison query:
+   Query: "this quarter vs last quarter revenue"
+   Response: {
+     "query_type": "comparison",
+     "comparison": {
+       "field": "revenue",
+       "aggregation_type": "sum",
+       "periods": [
+         {"name": "Q4 2024", "from": "2024-10-01", "to": "2024-12-31"},
+         {"name": "Q3 2024", "from": "2024-07-01", "to": "2024-09-30"}
+       ]
+     },
+     "explanation": "Comparing Q4 2024 revenue to Q3 2024 revenue"
+   }
+
+5. Top N with aggregation:
+   Query: "top 5 vendors by invoice count"
+   Response: {
+     "query_type": "aggregation",
+     "aggregation": {
+       "type": "terms",
+       "field": "vendor",
+       "config": {"size": 5, "order": "desc"}
+     },
+     "explanation": "Finding the 5 vendors with the most invoices"
+   }
 """
 
 
@@ -1890,7 +2071,7 @@ Now parse the user query above and return ONLY the JSON response."""
 
             guide_parts.append("")
 
-        # Section 2: Field-Specific Mappings (if template provided)
+        # Section 2: Field-Specific Mappings (if template provided) - SCHEMA-DRIVEN
         if template_context:
             template_name = template_context.get("name", "Unknown")
             template_fields = template_context.get("fields", [])
@@ -1903,14 +2084,88 @@ Now parse the user query above and return ONLY the JSON response."""
                 field_type = field.get("type", "text")
                 field_desc = field.get("description", "")
 
-                # Extract semantic terms from field name
-                terms = field_name.replace("_", " ").lower().split()
-                query_terms = ", ".join(terms)
+                # ✨ NEW: Use schema-driven search_metadata if available
+                search_meta = field.get("search_metadata", {})
+                example_queries = search_meta.get("example_queries", [])
+                query_keywords = search_meta.get("query_keywords", [])
+                boost_factor = search_meta.get("boost_factor", 1.0)
+                field_importance = search_meta.get("field_importance", "medium")
 
-                guide_parts.append(f"  Field: {field_name} ({field_type})")
+                guide_parts.append(f"  Field: {field_name} ({field_type}) - {field_importance.upper()} importance")
                 if field_desc:
                     guide_parts.append(f"    Description: {field_desc}")
-                guide_parts.append(f"    Query terms that should map to this field: {query_terms}")
+
+                # Use schema-provided keywords if available, else fall back to field name parsing
+                if query_keywords:
+                    guide_parts.append(f"    Query keywords: {', '.join(query_keywords[:8])}")
+                else:
+                    # Fallback: Extract semantic terms from field name
+                    terms = field_name.replace("_", " ").lower().split()
+                    guide_parts.append(f"    Query keywords (auto-generated): {', '.join(terms)}")
+
+                # Show example queries if available
+                if example_queries:
+                    guide_parts.append(f"    Example queries:")
+                    for example in example_queries[:3]:
+                        guide_parts.append(f"      - \"{example}\"")
+
+                # Show boost factor
+                guide_parts.append(f"    Search boost: {boost_factor}x")
+                guide_parts.append("")
+
+        # ✨ NEW Section 2.5: Aggregation Intelligence (Schema-Driven)
+        if template_context:
+            template_fields = template_context.get("fields", [])
+            aggregatable_fields = []
+
+            # Collect fields with aggregation metadata
+            for field in template_fields:
+                agg_meta = field.get("aggregation_metadata", {})
+                if agg_meta:
+                    field_name = field.get("name", "")
+                    field_type = field.get("type", "text")
+                    primary_agg = agg_meta.get("primary_aggregation", "sum")
+                    supported_aggs = agg_meta.get("supported_aggregations", [])
+                    group_by_fields = agg_meta.get("group_by_compatible", [])
+                    typical_queries = agg_meta.get("typical_queries", [])
+
+                    aggregatable_fields.append({
+                        "name": field_name,
+                        "type": field_type,
+                        "primary": primary_agg,
+                        "supported": supported_aggs,
+                        "group_by": group_by_fields,
+                        "queries": typical_queries
+                    })
+
+            if aggregatable_fields:
+                guide_parts.append("=" * 80)
+                guide_parts.append("📊 AGGREGATION INTELLIGENCE (SCHEMA-DRIVEN)")
+                guide_parts.append("=" * 80)
+                guide_parts.append("")
+                guide_parts.append("Use this metadata to detect and construct aggregation queries:")
+                guide_parts.append("")
+
+                for agg_field in aggregatable_fields:
+                    guide_parts.append(f"  Field: {agg_field['name']} ({agg_field['type']})")
+                    guide_parts.append(f"    Primary aggregation: {agg_field['primary'].upper()}")
+                    guide_parts.append(f"    Supported operations: {', '.join([a.upper() for a in agg_field['supported']])}")
+
+                    if agg_field['group_by']:
+                        guide_parts.append(f"    Can group by: {', '.join(agg_field['group_by'])}")
+
+                    if agg_field['queries']:
+                        guide_parts.append(f"    Typical queries:")
+                        for query in agg_field['queries'][:3]:
+                            guide_parts.append(f"      - \"{query}\"")
+
+                    guide_parts.append("")
+
+                guide_parts.append("⚡ AGGREGATION DETECTION RULES:")
+                guide_parts.append("  1. If user query matches typical_queries → use primary_aggregation")
+                guide_parts.append("  2. If query contains 'by <field>' → check group_by_compatible list")
+                guide_parts.append("  3. If query requests specific operation (avg, sum, etc.) → check supported_aggregations")
+                guide_parts.append("  4. Return aggregation object with: {type, field, group_by (optional)}")
                 guide_parts.append("")
 
         # Section 3: Concrete Examples

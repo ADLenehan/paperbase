@@ -144,7 +144,7 @@ async def get_nested_aggregations(request: NestedAggregationRequest):
     postgres_service = PostgresService(db)
 
     try:
-        result = await elastic_service.get_nested_aggregations(
+        result = await postgres_service.get_nested_aggregations(
             parent_agg=request.parent_agg,
             sub_aggs=request.sub_aggs,
             filters=request.filters

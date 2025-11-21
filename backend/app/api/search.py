@@ -10,6 +10,7 @@ from app.models.schema import Schema
 from app.services.answer_cache import get_answer_cache
 from app.services.claude_service import ClaudeService
 from app.services.postgres_service import PostgresService
+from app.services.query_expansion_service import QueryExpansionService
 from app.services.query_optimizer import QueryOptimizer
 from app.utils.query_field_extractor import (
     extract_fields_from_es_query,
@@ -57,6 +58,7 @@ async def search_documents(
     claude_service = ClaudeService()
     postgres_service = PostgresService(db)
     schema_registry = SchemaRegistry(db)
+    query_expander = QueryExpansionService()  # NEW: Phase 2 query expansion
 
     # Initialize QueryOptimizer with SchemaRegistry for dynamic field resolution
     query_optimizer = QueryOptimizer(schema_registry=schema_registry)
@@ -365,8 +367,56 @@ async def search_documents(
                     # Cache the answer
                     answer_cache.set(request.query, [], answer_result, cache_filters)
 
-        # Execute normal search if not aggregation query (or if aggregation validation failed)
-        if query_type != "aggregation" or not aggregation_spec:
+        # Handle comparison queries
+        elif query_type == "comparison" and nl_result and nl_result.get("comparison"):
+            # Execute comparison query
+            logger.info("Executing comparison query")
+            from app.services.comparison_service import ComparisonService
+
+            comparison_service = ComparisonService(db)
+            comparison_spec = nl_result["comparison"]
+
+            # Extract periods from comparison spec
+            periods = comparison_spec.get("periods", [])
+            if len(periods) >= 2:
+                period1 = periods[0]
+                period2 = periods[1]
+
+                # Execute comparison
+                comparison_result = await comparison_service.compare_periods(
+                    field=comparison_spec.get("field"),
+                    agg_type=comparison_spec.get("aggregation_type", "sum"),
+                    period1={"from": period1.get("from"), "to": period1.get("to")},
+                    period2={"from": period2.get("from"), "to": period2.get("to")},
+                    period1_name=period1.get("name"),
+                    period2_name=period2.get("name")
+                )
+
+                # Format answer for comparison
+                search_results = {"documents": [], "total": 0}
+
+                # Generate natural language answer about comparison
+                p1_name = comparison_result["period1"]["name"]
+                p1_value = comparison_result["period1"]["value"]
+                p2_name = comparison_result["period2"]["name"]
+                p2_value = comparison_result["period2"]["value"]
+                change = comparison_result["change"]
+
+                answer_result = {
+                    "answer": f"{p1_name}: ${p1_value:,.2f} vs {p2_name}: ${p2_value:,.2f}\n"
+                              f"Change: {'+' if change['absolute'] >= 0 else ''}${change['absolute']:,.2f} "
+                              f"({'+' if change['percentage'] >= 0 else ''}{change['percentage']:.1f}%) - "
+                              f"Trend: {change['trend']}",
+                    "comparison_data": comparison_result,
+                    "query_expansion_used": False
+                }
+            else:
+                # Not enough periods for comparison, fall back to search
+                logger.warning("Comparison query requires at least 2 periods. Falling back to search.")
+                query_type = "search"
+
+        # Execute normal search if not aggregation or comparison query
+        if query_type not in ["aggregation", "comparison"] or (query_type == "aggregation" and not aggregation_spec):
             # Execute PostgreSQL query for normal search
             search_results = await postgres_service.search(
                 query=None,
@@ -375,6 +425,56 @@ async def search_documents(
                 page=1,
                 size=20
             )
+
+            # PHASE 2 ENHANCEMENT: Zero-result fallback with query expansion
+            query_expansion_used = False
+            fuzzy_search_used = False
+            spelling_suggestions = []
+
+            if search_results.get("total", 0) == 0 and request.query:
+                logger.info(f"Zero results for query '{request.query}'. Trying query expansion...")
+
+                # Step 1: Try synonym-based query expansion
+                expanded_query = query_expander.expand_simple(request.query)
+
+                # Try search again with expanded query
+                search_results_expanded = await postgres_service.search(
+                    query=expanded_query,
+                    filters=None,
+                    custom_query=es_query,  # Still apply same filters/context
+                    page=1,
+                    size=20,
+                    use_weighted_tsv=True
+                )
+
+                if search_results_expanded.get("total", 0) > 0:
+                    logger.info(f"Query expansion successful! Found {search_results_expanded['total']} results")
+                    search_results = search_results_expanded
+                    query_expansion_used = True
+                else:
+                    logger.info("Query expansion did not improve results. Trying fuzzy search...")
+
+                    # Step 2: Try fuzzy search with trigram similarity
+                    fuzzy_results = await postgres_service.fuzzy_search_fallback(
+                        search_text=request.query,
+                        min_similarity=0.3
+                    )
+
+                    if fuzzy_results:
+                        logger.info(f"Fuzzy search found {len(fuzzy_results)} results")
+                        search_results = {
+                            "total": len(fuzzy_results),
+                            "documents": fuzzy_results,
+                            "search_method": "fuzzy_trigram"
+                        }
+                        fuzzy_search_used = True
+                    else:
+                        # Step 3: Get spelling suggestions (for "did you mean")
+                        logger.info("No fuzzy results. Generating spelling suggestions...")
+                        spelling_suggestions = await postgres_service.suggest_spelling(
+                            query_term=request.query,
+                            min_similarity=0.5
+                        )
 
             # Extract document IDs for cache key
             result_ids = [doc.get("id") for doc in search_results.get("documents", []) if doc.get("id")]
@@ -505,6 +605,9 @@ async def search_documents(
             "cached": False,
             "optimization_used": not use_claude,
             "query_confidence": query_analysis["confidence"],
+            "query_expansion_used": query_expansion_used if query_type != "aggregation" else False,  # PHASE 2 metadata
+            "fuzzy_search_used": fuzzy_search_used if query_type != "aggregation" else False,  # PHASE 2.5 fuzzy search
+            "spelling_suggestions": spelling_suggestions if query_type != "aggregation" else [],  # PHASE 2.5 spell check
             "folder_path": request.folder_path,
             # NEW: Query history fields
             "query_id": query_history.id,

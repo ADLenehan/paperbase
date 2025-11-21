@@ -1,5 +1,6 @@
 import { Outlet, Link, useLocation, useNavigate } from 'react-router-dom'
 import { useState, useEffect } from 'react'
+import { useAuth } from '../contexts/AuthContext'
 import MCPIndicator from './MCPIndicator'
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
@@ -7,18 +8,24 @@ const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
 function Layout() {
   const location = useLocation()
   const navigate = useNavigate()
+  const { logout, user } = useAuth()
   const [auditQueueCount, setAuditQueueCount] = useState(0)
   const [searchQuery, setSearchQuery] = useState('')
   const [searchResults, setSearchResults] = useState([])
   const [showResults, setShowResults] = useState(false)
   const [searching, setSearching] = useState(false)
 
+  const handleLogout = () => {
+    logout()
+    navigate('/login')
+  }
+
   const navItems = [
-    { path: '/', label: 'Upload' },
-    { path: '/documents', label: 'Documents' },
-    { path: '/audit', label: 'Audit', badge: auditQueueCount },
-    { path: '/query', label: 'Ask AI' },
-    { path: '/settings', label: 'Settings' },
+    { path: '/app', label: 'Upload' },
+    { path: '/app/documents', label: 'Documents' },
+    { path: '/app/audit', label: 'Audit', badge: auditQueueCount },
+    { path: '/app/query', label: 'Ask AI' },
+    { path: '/app/settings', label: 'Settings' },
   ]
 
   // Fetch audit queue count
@@ -78,7 +85,7 @@ function Layout() {
   const handleResultClick = (result) => {
     setShowResults(false)
     setSearchQuery('')
-    navigate(`/audit/document/${result.id}`)
+    navigate(`/app/audit/document/${result.id}`)
   }
 
   return (
@@ -88,7 +95,9 @@ function Layout() {
           <div className="flex justify-between h-16">
             <div className="flex items-center flex-1">
               <div className="flex-shrink-0 flex items-center">
-                <h1 className="text-xl font-bold text-gray-900">Paperbase</h1>
+                <Link to="/" className="text-xl font-display font-normal text-gray-900 hover:text-gray-700 transition-colors">
+                  Paperbase
+                </Link>
               </div>
               <div className="hidden sm:ml-6 sm:flex sm:space-x-8">
                 {navItems.map((item) => (
@@ -112,7 +121,7 @@ function Layout() {
               </div>
             </div>
 
-            {/* Search Bar */}
+            {/* Search Bar & User Menu */}
             <div className="flex items-center gap-4 search-container relative">
               {/* MCP Indicator */}
               <MCPIndicator />
@@ -179,6 +188,17 @@ function Layout() {
                   )}
                 </div>
               )}
+
+              {/* User Menu */}
+              <div className="flex items-center gap-3 border-l border-gray-200 pl-4">
+                <span className="text-sm text-gray-600">{user?.email || 'User'}</span>
+                <button
+                  onClick={handleLogout}
+                  className="px-3 py-1.5 text-sm text-gray-700 hover:text-gray-900 hover:bg-gray-100 rounded-md transition-colors"
+                >
+                  Logout
+                </button>
+              </div>
             </div>
           </div>
         </div>
