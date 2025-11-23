@@ -8,9 +8,11 @@ Supports various aggregation types, multi-dimensional analysis, and nested aggre
 import logging
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
+from sqlalchemy.orm import Session
 
+from app.core.database import get_db
 from app.services.postgres_service import PostgresService
 
 logger = logging.getLogger(__name__)
@@ -49,7 +51,10 @@ class NestedAggregationRequest(BaseModel):
 
 
 @router.post("/single")
-async def get_single_aggregation(request: AggregationRequest):
+async def get_single_aggregation(
+    request: AggregationRequest,
+    db: Session = Depends(get_db)
+):
     """
     Execute a single aggregation query.
 
@@ -84,7 +89,10 @@ async def get_single_aggregation(request: AggregationRequest):
 
 
 @router.post("/multi")
-async def get_multi_aggregations(request: MultiAggregationRequest):
+async def get_multi_aggregations(
+    request: MultiAggregationRequest,
+    db: Session = Depends(get_db)
+):
     """
     Execute multiple aggregations in a single query for efficiency.
 
@@ -123,7 +131,10 @@ async def get_multi_aggregations(request: MultiAggregationRequest):
 
 
 @router.post("/nested")
-async def get_nested_aggregations(request: NestedAggregationRequest):
+async def get_nested_aggregations(
+    request: NestedAggregationRequest,
+    db: Session = Depends(get_db)
+):
     """
     Execute nested (hierarchical) aggregations.
 
@@ -163,7 +174,7 @@ async def get_nested_aggregations(request: NestedAggregationRequest):
 
 
 @router.get("/dashboard")
-async def get_dashboard_aggregations():
+async def get_dashboard_aggregations(db: Session = Depends(get_db)):
     """
     Get pre-configured dashboard aggregations for common analytics.
 
@@ -230,7 +241,7 @@ async def get_dashboard_aggregations():
 
 
 @router.get("/insights/{field}")
-async def get_field_insights(field: str):
+async def get_field_insights(field: str, db: Session = Depends(get_db)):
     """
     Get comprehensive insights for a specific field.
 
@@ -296,7 +307,10 @@ async def get_field_insights(field: str):
 
 
 @router.post("/custom")
-async def execute_custom_aggregation(custom_query: Dict[str, Any]):
+async def execute_custom_aggregation(
+    custom_query: Dict[str, Any],
+    db: Session = Depends(get_db)
+):
     """
     Execute a custom Elasticsearch aggregation query.
 
@@ -355,7 +369,11 @@ async def execute_custom_aggregation(custom_query: Dict[str, Any]):
 
 
 @router.get("/presets/{preset_name}")
-async def get_preset_aggregation(preset_name: str, filters: Optional[Dict[str, Any]] = None):
+async def get_preset_aggregation(
+    preset_name: str,
+    filters: Optional[Dict[str, Any]] = None,
+    db: Session = Depends(get_db)
+):
     """
     Execute pre-configured aggregation presets.
 
