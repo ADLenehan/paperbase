@@ -165,7 +165,7 @@ async def natural_language_query(
         aggregations = None
         if parsed_query.get("query_type") == "aggregation":
             aggregations = await _handle_aggregation_query(
-                parsed_query, elastic_service, results
+                parsed_query, postgres_service, results
             )
 
         # Generate conversational summary

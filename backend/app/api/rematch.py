@@ -74,7 +74,7 @@ async def rematch_all_documents(
             # Use hybrid matching
             match_result = await hybrid_match_document(
                 document=doc,
-                elastic_service=elastic_service,
+                postgres_service=postgres_service,
                 claude_service=claude_service,
                 available_templates=template_data,
                 db=db
@@ -123,14 +123,14 @@ async def rematch_all_documents(
             })
 
     db.commit()
-    await elastic_service.close()
+    # PostgresService doesn't need explicit close (uses DB session from context)
 
     return {
         "success": True,
         "total_processed": len(unmatched_docs),
         "matched_count": matched_count,
         "analytics": {
-            "elasticsearch_matches": len(unmatched_docs) - claude_fallback_count,
+            "postgres_matches": len(unmatched_docs) - claude_fallback_count,
             "claude_fallback_matches": claude_fallback_count,
             "cost_estimate": f"${claude_fallback_count * 0.01:.3f}"
         },
@@ -178,7 +178,7 @@ async def rematch_single_document(
         # Use hybrid matching
         match_result = await hybrid_match_document(
             document=doc,
-            elastic_service=elastic_service,
+            postgres_service=postgres_service,
             claude_service=claude_service,
             available_templates=template_data,
             db=db
@@ -219,5 +219,4 @@ async def rematch_single_document(
             status_code=500,
             detail=f"Failed to rematch document: {str(e)}"
         )
-    finally:
-        await elastic_service.close()
+    # PostgresService doesn't need explicit close (uses DB session from context)
