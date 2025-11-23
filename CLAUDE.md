@@ -105,10 +105,10 @@ Users upload documents → AI auto-matches templates → Bulk confirmation → N
 **Key Innovation**: Bulk-first workflow with intelligent template matching - SIMPLE and POWERFUL
 
 ## Tech Stack
-- **Backend**: FastAPI (Python 3.11+), SQLAlchemy, SQLite
+- **Backend**: FastAPI (Python 3.11+), SQLAlchemy, PostgreSQL 16
 - **Frontend**: React 18, TailwindCSS, Vite
 - **Document Processing**: Reducto API (provides confidence scores)
-- **Search**: Elasticsearch 8.x (open source, self-hosted)
+- **Search**: PostgreSQL full-text search (tsvector, ts_rank, pg_trgm)
 - **AI**: Anthropic Claude Sonnet 4.5
 - **Deployment**: Docker Compose
 
@@ -178,22 +178,23 @@ Upload → SHA256 Hash → Existing? → Reuse PhysicalFile + Parse Cache ✓
   - Example: `invoice.pdf` uploaded 3 times → Parse once, save $0.04
   - Savings: 20-70% of parse costs (depending on duplicate rate)
 
-- **Tier 2: Elasticsearch Clustering (Content Similarity)**
+- **Tier 2: PostgreSQL Similarity (Content Similarity)**
   - Purpose: Group similar documents for template matching
   - When: AFTER parsing (needs content)
   - Groups: Structurally similar documents (same fields)
   - Example: `invoice_jan.pdf`, `invoice_feb.pdf`, `invoice_mar.pdf` → 1 template
   - Benefit: Better UX (auto-template selection), not cost savings
+  - Uses: pg_trgm extension for trigram similarity matching
 
-**Key Insight**: SHA256 prevents redundant API calls, ES improves user experience.
+**Key Insight**: SHA256 prevents redundant API calls, PostgreSQL similarity improves user experience.
 
-### Elasticsearch Best Practices (NEW)
-- **Explicit Mapping**: `dynamic: strict` prevents unexpected schema changes
-- **Field Protection**: `ignore_above: 256` on keyword fields prevents indexing failures
-- **Storage Optimization**: Text fields use text+keyword (not text+keyword+raw) for 30% savings
-- **Mapping Explosion Prevention**: Hard limits on total fields (1000), depth (20), nested (50)
-- **Bulk Indexing**: Temporary refresh disabling for 20-30% faster bulk operations
-- **Production Ready**: Settings optimized for reliability and performance at scale
+### PostgreSQL Search Features (Migrated from Elasticsearch)
+- **Full-text Search**: Uses `tsvector` and `ts_rank` for BM25-style relevance ranking
+- **Fuzzy Matching**: pg_trgm extension for similarity search and typo tolerance
+- **JSON Indexing**: GIN indexes on JSONB columns for fast field filtering
+- **Aggregations**: Native SQL GROUP BY with SUM, AVG, COUNT, percentiles
+- **Performance**: Comparable to Elasticsearch for <100k documents
+- **Benefits**: Single database, simpler ops, better for structured data, correct aggregation totals
 
 ## Project Structure
 ```
@@ -243,7 +244,8 @@ paperbase/
 - `app/services/file_service.py` - **NEW** File upload with hash-based deduplication
 - `app/services/claude_service.py` - Template matching + NL search + **complexity assessment**
 - `app/services/reducto_service.py` - Pipeline support with `jobid://` + **complex data extraction**
-- `app/services/elastic_service.py` - Content clustering + custom query support + **nested/array mappings**
+- `app/services/postgres_service.py` - **PRIMARY** Full-text search, aggregations, similarity matching
+- `app/services/elastic_service.py` - **DEPRECATED** Legacy Elasticsearch service (can be removed)
 - `app/models/settings.py` - Settings, Organization, User models
 - `app/models/permissions.py` - **NEW** Roles, Permissions, APIKey models
 - `app/models/physical_file.py` - **NEW** Physical file storage with SHA256 deduplication
@@ -456,7 +458,7 @@ docker-compose down -v
 
 ### Unit Tests
 - All services have test coverage
-- Mock external APIs (Reducto, Claude, Elasticsearch)
+- Mock external APIs (Reducto, Claude, PostgreSQL)
 - Target: 80% coverage
 
 ### Integration Tests
@@ -472,13 +474,13 @@ docker-compose down -v
 
 ### MVP (Current)
 - Docker Compose on single server
-- SQLite database (good for <10k docs)
-- Self-hosted Elasticsearch
+- PostgreSQL database (good for <100k docs)
+- Single-server deployment
 
 ### Production (Future)
 - Kubernetes or cloud deployment
-- PostgreSQL database
-- Managed Elasticsearch or similar
+- PostgreSQL with connection pooling (PgBouncer)
+- Managed PostgreSQL (AWS RDS, Railway, etc.)
 - Redis for caching
 - Celery for background jobs
 
@@ -532,10 +534,11 @@ Always use context7 when I need code generation, setup or configuration steps, o
 
 ## Troubleshooting
 
-### Elasticsearch won't start
-- Check Docker has 8GB RAM allocated
-- Ensure 20GB+ free disk space
-- Try: `docker-compose down -v && docker-compose up`
+### PostgreSQL won't start
+- Check Docker has sufficient RAM (2GB minimum)
+- Ensure 10GB+ free disk space
+- Check port 5434 is not in use: `lsof -i :5434`
+- Try: `docker-compose down -v && docker-compose up postgres`
 
 ### Reducto API errors
 - Verify API key is correct
@@ -787,7 +790,8 @@ Before implementing ANY data model change:
 - [Reducto Docs](https://docs.reducto.ai)
 - [Reducto Pipelining](https://docs.reducto.ai/extraction/pipelining) - **IMPLEMENTED**
 - [Anthropic Claude Docs](https://docs.anthropic.com)
-- [Elasticsearch Docs](https://www.elastic.co/guide/en/elasticsearch/reference/current/index.html)
+- [PostgreSQL Full-Text Search](https://www.postgresql.org/docs/current/textsearch.html)
+- [PostgreSQL pg_trgm Extension](https://www.postgresql.org/docs/current/pgtrgm.html)
 - [FastAPI Docs](https://fastapi.tiangolo.com)
 - [React Docs](https://react.dev)
 

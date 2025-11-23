@@ -5,7 +5,7 @@
 Paperbase requires **3 Railway services**:
 1. **Backend** (Python/FastAPI)
 2. **Frontend** (React/Vite)
-3. **Elasticsearch** (search engine)
+3. **PostgreSQL** (database + full-text search)
 
 ## Step-by-Step Deployment
 
@@ -22,18 +22,17 @@ Paperbase requires **3 Railway services**:
    ```
    ANTHROPIC_API_KEY=your-key-here
    REDUCTO_API_KEY=your-key-here
-   DATABASE_URL=sqlite:///./paperbase.db
-   ELASTICSEARCH_URL=http://elasticsearch:9200
+   DATABASE_URL=${{Postgres.DATABASE_URL}}
    SECRET_KEY=your-secret-key-here
    CORS_ORIGINS=https://your-frontend-url.railway.app
    ```
 
-### 2. Create Elasticsearch Service
+### 2. Create PostgreSQL Database
 
-1. In the same project, click **"New Service"** → **"Database"** → **"Add Elasticsearch"**
-2. Railway will provision an Elasticsearch instance
-3. Note the internal URL (usually `http://elasticsearch:9200`)
-4. Update the backend's `ELASTICSEARCH_URL` to point to this URL
+1. In the same project, click **"New Service"** → **"Database"** → **"Add PostgreSQL"**
+2. Railway will provision a PostgreSQL instance
+3. The DATABASE_URL will be automatically available via `${{Postgres.DATABASE_URL}}`
+4. Run migrations after first deploy (see Post-Deployment Setup below)
 
 ### 3. Create Frontend Service
 
@@ -54,16 +53,15 @@ Paperbase requires **3 Railway services**:
 
 ### 4. Link Services Together
 
-Railway automatically creates a private network between services in the same project. Use these internal URLs:
+Railway automatically creates a private network between services in the same project:
 
 - Frontend → Backend: Use the public backend URL (`https://paperbase-backend.railway.app`)
-- Backend → Elasticsearch: Use internal URL (`http://elasticsearch:9200`)
+- Backend → PostgreSQL: Use `${{Postgres.DATABASE_URL}}` (automatically injected)
 
 ## Production Checklist
 
 ### Backend Configuration
-- [ ] `DATABASE_URL` set (consider PostgreSQL for production instead of SQLite)
-- [ ] `ELASTICSEARCH_URL` points to Railway Elasticsearch service
+- [ ] `DATABASE_URL` set to `${{Postgres.DATABASE_URL}}`
 - [ ] `SECRET_KEY` is a strong random string (generate with `openssl rand -hex 32`)
 - [ ] `ANTHROPIC_API_KEY` is set
 - [ ] `REDUCTO_API_KEY` is set
@@ -75,20 +73,34 @@ Railway automatically creates a private network between services in the same pro
 - [ ] Static files are served correctly
 
 ### Database Setup
-- [ ] Run migrations if using PostgreSQL: `alembic upgrade head`
+- [ ] Run PostgreSQL migrations: See Post-Deployment Setup below
+- [ ] Initialize PostgreSQL extensions: pg_trgm, btree_gin (automatic via migrations)
 - [ ] Initialize default roles: `POST /api/roles/initialize`
 - [ ] Create admin user (see below)
 
 ## Post-Deployment Setup
 
-### 1. Initialize Authentication System
+### 1. Run Database Migrations
+
+```bash
+# In Railway backend shell (or via Railway CLI)
+cd backend
+python -m migrations.create_postgres_search_tables
+
+# This will:
+# - Install PostgreSQL extensions (pg_trgm, btree_gin)
+# - Create search tables (document_search_index, template_signatures)
+# - Set up full-text search indexes
+```
+
+### 2. Initialize Authentication System
 
 ```bash
 # Call the initialization endpoint
 curl -X POST https://your-backend-url.railway.app/api/roles/initialize
 ```
 
-### 2. Create Admin User
+### 3. Create Admin User
 
 Use the Railway backend shell or create a script:
 
@@ -123,24 +135,23 @@ Run in Railway shell:
 cd backend && python scripts/create_admin.py
 ```
 
-## Switching to PostgreSQL (Recommended for Production)
+## PostgreSQL Configuration
 
-SQLite is not recommended for Railway because the filesystem is ephemeral. Use PostgreSQL:
+Paperbase uses PostgreSQL for both metadata storage and full-text search (replacing Elasticsearch).
 
-1. Add PostgreSQL database in Railway:
-   - Click **"New Service"** → **"Database"** → **"Add PostgreSQL"**
+### PostgreSQL Extensions Required
 
-2. Update backend environment variable:
-   ```
-   DATABASE_URL=${{Postgres.DATABASE_URL}}
-   ```
-   (Railway will auto-inject the PostgreSQL connection string)
+The migration script automatically installs:
+- **pg_trgm**: Trigram similarity for fuzzy matching and template similarity
+- **btree_gin**: GIN indexes on scalar types for better performance
 
-3. Run migrations:
-   ```bash
-   # In Railway backend shell
-   alembic upgrade head
-   ```
+### Full-Text Search
+
+PostgreSQL provides:
+- `tsvector` columns for full-text indexing
+- `ts_rank` for BM25-style relevance ranking
+- GIN indexes for fast text search
+- JSONB support for dynamic fields
 
 ## File Storage Considerations
 
@@ -178,27 +189,34 @@ Migrate to S3/GCS/Azure Blob Storage:
 - Verify CORS settings in backend
 - Check browser console for errors
 
-**Elasticsearch connection failed:**
-- Verify Elasticsearch service is running
-- Check `ELASTICSEARCH_URL` is correct
+**PostgreSQL connection failed:**
+- Verify PostgreSQL service is running in Railway
+- Check `DATABASE_URL` is correctly injected: `${{Postgres.DATABASE_URL}}`
 - Ensure services are in the same project (private network)
 
 **Database errors:**
-- If using PostgreSQL, ensure migrations ran: `alembic upgrade head`
+- Ensure migrations ran: `python -m migrations.create_postgres_search_tables`
+- Check PostgreSQL extensions are installed (pg_trgm, btree_gin)
 - Check `DATABASE_URL` format is correct
+
+**Search not working:**
+- Verify `document_search_index` table exists
+- Check GIN indexes are created on tsvector columns
+- Ensure documents are being indexed (check table for rows)
 
 ## Cost Optimization
 
 Railway charges based on:
 - CPU/RAM usage
 - Data transfer
-- Storage (volumes)
+- Database storage
 
 Tips:
 1. Use the **Hobby Plan** ($5/month per service) for small deployments
-2. Consider combining frontend/backend into one service (not recommended but possible)
-3. Monitor Elasticsearch resource usage (it can be memory-intensive)
+2. PostgreSQL is included in Railway's database plans (~$5-10/month)
+3. Monitor database storage and implement archival strategies
 4. Use Railway's sleep feature for non-production environments
+5. Consider connection pooling (PgBouncer) for high-traffic scenarios
 
 ## Environment Variables Reference
 
@@ -207,13 +225,13 @@ Tips:
 # Required
 ANTHROPIC_API_KEY=sk-ant-...
 REDUCTO_API_KEY=...
-DATABASE_URL=postgresql://user:pass@host:5432/paperbase
-ELASTICSEARCH_URL=http://elasticsearch:9200
+DATABASE_URL=${{Postgres.DATABASE_URL}}  # Auto-injected by Railway
 SECRET_KEY=your-secret-key-here
 
 # Optional
 CORS_ORIGINS=https://your-frontend-url.railway.app
 LOG_LEVEL=INFO
+DEBUG=False
 ```
 
 ### Frontend (.env.production)
@@ -253,8 +271,11 @@ curl https://your-backend-url.railway.app/health
 # Frontend (should return HTML)
 curl https://your-frontend-url.railway.app
 
-# Elasticsearch (from backend shell)
-curl http://elasticsearch:9200
+# PostgreSQL connection (from backend shell)
+psql $DATABASE_URL -c "SELECT version();"
+
+# Check search tables exist
+psql $DATABASE_URL -c "SELECT COUNT(*) FROM document_search_index;"
 ```
 
 ## Next Steps
