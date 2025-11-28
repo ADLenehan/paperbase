@@ -14,7 +14,7 @@ function Layout() {
   const [searching, setSearching] = useState(false)
 
   const navItems = [
-    { path: '/', label: 'Upload' },
+    { path: '/upload', label: 'Upload' },
     { path: '/documents', label: 'Documents' },
     { path: '/audit', label: 'Audit', badge: auditQueueCount },
     { path: '/query', label: 'Ask AI' },

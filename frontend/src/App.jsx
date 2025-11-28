@@ -1,5 +1,6 @@
 import { Routes, Route } from 'react-router-dom'
 import Layout from './components/Layout'
+import LandingPage from './pages/LandingPage'
 import BulkUpload from './pages/BulkUpload'
 import BulkConfirmation from './pages/BulkConfirmation'
 import DocumentsDashboard from './pages/DocumentsDashboard'
@@ -13,8 +14,12 @@ import Settings from './pages/Settings'
 function App() {
   return (
     <Routes>
+      {/* Landing page - standalone, outside Layout */}
+      <Route path="/" element={<LandingPage />} />
+
+      {/* App routes - inside Layout */}
       <Route path="/" element={<Layout />}>
-        <Route index element={<BulkUpload />} />
+        <Route path="upload" element={<BulkUpload />} />
         <Route path="confirm" element={<BulkConfirmation />} />
         <Route path="documents" element={<DocumentsDashboard />} />
         <Route path="documents/:documentId" element={<DocumentDetail />} />
