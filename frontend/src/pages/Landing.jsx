@@ -253,15 +253,23 @@ const Landing = () => {
                       </li>
                     </ul>
                   </div>
-                  <div className="rounded-xl overflow-hidden bg-gray-100 aspect-[4/3] flex items-center justify-center border-2 border-dashed border-gray-300">
-                    <span className="text-gray-400 text-lg font-medium">Product Screenshot: Bulk Upload UI</span>
+                  <div className="rounded-xl overflow-hidden shadow-lg border border-gray-200">
+                    <img
+                      src="/images/Smart_template.png"
+                      alt="Template field editor showing AI-suggested fields for SaaS Purchase Order"
+                      className="w-full h-auto"
+                    />
                   </div>
                 </div>
 
                 {/* Capability 2: Inline Audit */}
                 <div className="grid lg:grid-cols-2 gap-8 items-center">
-                  <div className="rounded-xl overflow-hidden bg-gray-100 aspect-[4/3] flex items-center justify-center border-2 border-dashed border-gray-300 lg:order-1">
-                    <span className="text-gray-400 text-lg font-medium">Product Screenshot: Inline Audit Modal</span>
+                  <div className="rounded-xl overflow-hidden shadow-lg border border-gray-200 lg:order-1">
+                    <img
+                      src="/images/Extracted_fields.png"
+                      alt="Extracted fields with confidence scores showing vendor_name at 85% with verify button"
+                      className="w-full h-auto"
+                    />
                   </div>
                   <div className="lg:order-2">
                     <div className="inline-block px-3 py-1 rounded-full bg-yellow-50 border border-yellow-200 text-yellow-700 text-xs font-medium mb-4" style={{ fontFamily: 'Arial, sans-serif' }}>
@@ -313,8 +321,75 @@ const Landing = () => {
                       </li>
                     </ul>
                   </div>
-                  <div className="rounded-xl overflow-hidden bg-gray-100 aspect-[4/3] flex items-center justify-center border-2 border-dashed border-gray-300">
-                    <span className="text-gray-400 text-lg font-medium">Product Screenshot: Natural Language Search</span>
+                  {/* NL Search Mockup */}
+                  <div className="rounded-xl overflow-hidden shadow-lg border border-gray-200 bg-gray-50 p-4">
+                    {/* Chat Header */}
+                    <div className="bg-white rounded-t-lg border-b px-4 py-3 mb-4">
+                      <h4 className="text-base font-semibold text-gray-900">AI Document Search</h4>
+                      <p className="text-xs text-gray-500">Ask questions in natural language</p>
+                    </div>
+
+                    {/* User Query */}
+                    <div className="flex justify-end mb-3">
+                      <div className="bg-blue-600 text-white rounded-lg px-4 py-2 max-w-[80%]">
+                        <p className="text-sm text-white">Show me invoices over $5,000 from Q4</p>
+                      </div>
+                    </div>
+
+                    {/* AI Response */}
+                    <div className="flex justify-start mb-3">
+                      <div className="bg-white border border-gray-200 rounded-lg px-4 py-3 max-w-[90%]">
+                        <p className="text-sm text-gray-800 mb-3">
+                          Found <span className="font-semibold">3 invoices</span> over $5,000 from Q4 2024:
+                        </p>
+
+                        {/* Confidence Badge */}
+                        <div className="flex items-center gap-2 mb-3">
+                          <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-100 text-green-800">
+                            92% confident
+                          </span>
+                          <span className="text-xs text-gray-500">3 sources cited</span>
+                        </div>
+
+                        {/* Document Results */}
+                        <div className="space-y-2">
+                          <div className="p-2 bg-gray-50 rounded border border-gray-200 text-xs">
+                            <div className="flex items-center justify-between">
+                              <span className="font-medium text-gray-900">Invoice_Acme_Dec.pdf</span>
+                              <span className="text-green-600 font-medium">$7,450.00</span>
+                            </div>
+                            <p className="text-gray-500 mt-1">Acme Corp • Dec 15, 2024</p>
+                          </div>
+                          <div className="p-2 bg-gray-50 rounded border border-gray-200 text-xs">
+                            <div className="flex items-center justify-between">
+                              <span className="font-medium text-gray-900">Invoice_TechStart_Nov.pdf</span>
+                              <span className="text-green-600 font-medium">$12,300.00</span>
+                            </div>
+                            <p className="text-gray-500 mt-1">TechStart Inc • Nov 28, 2024</p>
+                          </div>
+                          <div className="p-2 bg-gray-50 rounded border border-gray-200 text-xs">
+                            <div className="flex items-center justify-between">
+                              <span className="font-medium text-gray-900">Invoice_Global_Oct.pdf</span>
+                              <span className="text-green-600 font-medium">$5,890.00</span>
+                            </div>
+                            <p className="text-gray-500 mt-1">Global Services • Oct 10, 2024</p>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Input Area */}
+                    <div className="flex gap-2 mt-4">
+                      <input
+                        type="text"
+                        placeholder="Ask a follow-up question..."
+                        className="flex-1 px-3 py-2 text-sm border border-gray-300 rounded-lg bg-white"
+                        disabled
+                      />
+                      <button className="px-4 py-2 bg-blue-600 text-white text-sm rounded-lg font-medium">
+                        Search
+                      </button>
+                    </div>
                   </div>
                 </div>
               </div>
