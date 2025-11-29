@@ -5,7 +5,7 @@ import DevModeBanner from './components/DevModeBanner'
 import Login from './pages/Login'
 import SignUp from './pages/SignUp'
 import Layout from './components/Layout'
-import LandingPage from './pages/LandingPage'
+import Landing from './pages/Landing'
 import BulkUpload from './pages/BulkUpload'
 import BulkConfirmation from './pages/BulkConfirmation'
 import DocumentsDashboard from './pages/DocumentsDashboard'
@@ -33,7 +33,7 @@ function App() {
       <DevModeBanner />
       <Routes>
         {/* Public routes */}
-        <Route path="/" element={<LandingPage />} />
+        <Route path="/" element={<Landing />} />
         <Route path="/login" element={<Login />} />
         <Route path="/signup" element={<SignUp />} />
 

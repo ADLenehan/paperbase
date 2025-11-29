@@ -253,15 +253,23 @@ const Landing = () => {
                       </li>
                     </ul>
                   </div>
-                  <div className="rounded-xl overflow-hidden bg-gray-100 aspect-[4/3] flex items-center justify-center border-2 border-dashed border-gray-300">
-                    <span className="text-gray-400 text-lg font-medium">Product Screenshot: Bulk Upload UI</span>
+                  <div className="rounded-xl overflow-hidden shadow-lg border border-gray-200">
+                    <img
+                      src="/images/Smart_template.png"
+                      alt="Template field editor showing AI-suggested fields for SaaS Purchase Order"
+                      className="w-full h-auto"
+                    />
                   </div>
                 </div>
 
                 {/* Capability 2: Inline Audit */}
                 <div className="grid lg:grid-cols-2 gap-8 items-center">
-                  <div className="rounded-xl overflow-hidden bg-gray-100 aspect-[4/3] flex items-center justify-center border-2 border-dashed border-gray-300 lg:order-1">
-                    <span className="text-gray-400 text-lg font-medium">Product Screenshot: Inline Audit Modal</span>
+                  <div className="rounded-xl overflow-hidden shadow-lg border border-gray-200 lg:order-1">
+                    <img
+                      src="/images/Extracted_fields.png"
+                      alt="Extracted fields with confidence scores showing vendor_name at 85% with verify button"
+                      className="w-full h-auto"
+                    />
                   </div>
                   <div className="lg:order-2">
                     <div className="inline-block px-3 py-1 rounded-full bg-yellow-50 border border-yellow-200 text-yellow-700 text-xs font-medium mb-4" style={{ fontFamily: 'Arial, sans-serif' }}>
@@ -313,8 +321,12 @@ const Landing = () => {
                       </li>
                     </ul>
                   </div>
-                  <div className="rounded-xl overflow-hidden bg-gray-100 aspect-[4/3] flex items-center justify-center border-2 border-dashed border-gray-300">
-                    <span className="text-gray-400 text-lg font-medium">Product Screenshot: Natural Language Search</span>
+                  <div className="rounded-xl overflow-hidden shadow-lg border border-gray-200">
+                    <img
+                      src="/images/template_adobe.png"
+                      alt="Template editor with Modify with AI feature for natural language field editing"
+                      className="w-full h-auto"
+                    />
                   </div>
                 </div>
               </div>
