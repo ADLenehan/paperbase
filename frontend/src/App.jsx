@@ -2,15 +2,14 @@ import { Routes, Route, Navigate, useParams } from 'react-router-dom'
 import { AuthProvider } from './contexts/AuthContext'
 import ProtectedRoute from './components/ProtectedRoute'
 import DevModeBanner from './components/DevModeBanner'
-import Landing from './pages/Landing'
 import Login from './pages/Login'
 import SignUp from './pages/SignUp'
 import Layout from './components/Layout'
+import LandingPage from './pages/LandingPage'
 import BulkUpload from './pages/BulkUpload'
 import BulkConfirmation from './pages/BulkConfirmation'
 import DocumentsDashboard from './pages/DocumentsDashboard'
 import DocumentDetail from './pages/DocumentDetail'
-import NaturalLanguageQuery from './pages/NaturalLanguageQuery'
 import ChatSearch from './pages/ChatSearch'
 import Audit from './pages/Audit'
 import SchemaEditor from './pages/SchemaEditor'
@@ -34,7 +33,7 @@ function App() {
       <DevModeBanner />
       <Routes>
         {/* Public routes */}
-        <Route path="/" element={<Landing />} />
+        <Route path="/" element={<LandingPage />} />
         <Route path="/login" element={<Login />} />
         <Route path="/signup" element={<SignUp />} />
 
